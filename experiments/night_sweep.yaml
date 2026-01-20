@@ -1,0 +1,78 @@
+experiments:
+  S1_sdpa_dense_sweep:
+    type: sdpa_dense
+    dtype: fp16
+    shapes:
+      - {batch: 4, seq_len: 2048, n_heads: 32}
+      - {batch: 1, seq_len: 4096, n_heads: 32}
+    head_dim_range: [64, 160]
+    head_dim_step_1: 1  # step for 64..128
+    head_dim_step_2: 2  # step for 128..160
+    backend: AUTO
+    warmup: 50
+    measure: 200
+    trials: 3
+
+  S2_sdpa_backend_forced:
+    type: sdpa_backend_forced
+    dtype: fp16
+    shape: {batch: 4, seq_len: 2048, n_heads: 32}
+    head_dims: [96, 104, 107, 112, 120, 128]
+    backends: [AUTO, FLASH, MEM_EFFICIENT, MATH]
+    warmup: 50
+    measure: 200
+    trials: 3
+
+  G3_gemm_k_dense:
+    type: gemm_k_dense
+    dtypes: [fp16, bf16]
+    shape: {M: 4096, N: 4096}
+    K_range: [64, 160]
+    K_step_1: 1  # step for 64..128
+    K_step_2: 2  # step for 128..160
+    warmup: 50
+    measure: 200
+    trials: 3
+
+  G4_gemm_n_dense_projectionlike:
+    type: gemm_n_dense
+    dtypes: [fp16, bf16]
+    M_values: [1024, 4096, 16384]
+    K: 4096
+    N_range: [64, 160]
+    N_step_1: 1  # step for 64..128
+    N_step_2: 2  # step for 128..160
+    warmup: 50
+    measure: 200
+    trials: 3
+
+  P1_padding_rescue:
+    type: padding_rescue
+    dtype: fp16
+    logical_head_dim: 107
+    pad_options: [107, 112, 128]
+    sdpa_shape: {batch: 4, seq_len: 2048, n_heads: 32}
+    gemm_shapes:
+      - {M: 4096, N: 4096, K: 107}  # reduction
+      - {M: 4096, K: 4096, N: 107}  # projection
+    warmup: 50
+    measure: 200
+    trials: 3
+
+  HET1_head_hetero_batching_penalty:
+    type: hetero_batching
+    dtype: fp16
+    total_N: 4096
+    H: 32
+    patterns:
+      uniform:
+        groups: [{dim: 128, count: 32}]
+      mild:
+        groups: [{dim: 128, count: 28}, {dim: 112, count: 4}]
+      medium:
+        groups: [{dim: 128, count: 16}, {dim: 112, count: 8}, {dim: 96, count: 8}]
+      severe:
+        groups: [{dim: 128, count: 8}, {dim: 112, count: 8}, {dim: 107, count: 8}, {dim: 96, count: 8}]
+    warmup: 50
+    measure: 200
+    trials: 3

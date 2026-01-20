@@ -1,0 +1,15 @@
+# results & logs
+results/
+slurm_logs/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# local envs
+.venv/
+venv/
+
+# temp
+*.tmp
+.DS_Store

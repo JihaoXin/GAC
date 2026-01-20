@@ -1,0 +1,23 @@
+infer_sweep:
+  prefill:
+    batch: [1, 4, 8]
+    seq_len: [256, 512, 1024, 2048, 4096]
+  decode:
+    batch: [1, 4]
+    context_len: [512, 1024, 2048]
+    gen_len: [64, 128]
+  warmup:
+    prefill: 10
+    decode: 5
+  measure: 30
+  trials: 3
+  greedy: true
+
+ppl:
+  dataset: wikitext2_or_fallback
+  block_size: 512
+
+lmeval:
+  tasks: [piqa, hellaswag]
+  limit: 200
+  fewshot: 0
