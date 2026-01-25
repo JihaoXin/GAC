@@ -121,7 +121,12 @@ This paper makes the following contributions:
   \item \textbf{Root Cause Analysis}: We identify the causes across three layers: PyTorch backend selection, CUDA kernel paths, and hardware constraints (\S\ref{sec:causes}).
   \item \textbf{Shape Contract}: We formalize dimension alignment requirements as optimization constraints (\S\ref{sec:solution}).
   \item \textbf{Dimension Repair}: We propose a lightweight post-compression pass that restores alignment (\S\ref{sec:solution}).
-  \item \textbf{Evaluation}: Kernel-level experiments validate dimension repair achieves 25--30\% speedup with 3.7--4.7\% memory overhead on SDPA and GEMM microbenchmarks. \textbf{Note:} End-to-end integration with SVD-based compression (e.g., PaLU) is future work due to factorized weight structure challenges ($W = U \cdot V^T$) (\S\ref{sec:eval}).
+  \item \textbf{Evaluation}:
+  \begin{itemize}
+    \item \emph{Validated}: Kernel-level experiments on SDPA and GEMM microbenchmarks demonstrate 25--30\% speedup with 3.7--4.7\% memory overhead.
+    \item \emph{Future Work}: End-to-end integration with SVD-based compression requires adapting to factorized weight structures ($W = U \cdot V^T$).
+  \end{itemize}
+  (\S\ref{sec:eval}).
 \end{enumerate}
 
 %% ===========================================
@@ -399,7 +404,11 @@ For optimal Tensor Core utilization, prefer $d_{pad} \mod 16 = 0$.
   \STATE $b' \in \mathbb{R}^{d'_{out}} \gets \mathbf{0}$
   \STATE $b'[0:d_{out}] \gets b$ \COMMENT{Copy original bias}
 \ENDIF
-\RETURN $W'$ (and $b'$ if bias exists)
+\IF{$b$ exists}
+  \RETURN $W'$, $b'$
+\ELSE
+  \RETURN $W'$
+\ENDIF
 \end{algorithmic}
 \end{algorithm}
 
@@ -497,10 +506,7 @@ Strategy & Alignment Target & Memory Overhead \\
 \midrule
 MINIMAL & mod 8 & 3.72\% \\
 OPTIMAL & mod 16 & 7.20\% \\
-PREDEFINED$^\dagger$ & \{64,96,112,128\} & 7.20\% \\
 \bottomrule
-\multicolumn{3}{l}{\footnotesize $^\dagger$PREDEFINED maps to same targets as OPTIMAL for PaLU dimensions}\\
-\multicolumn{3}{l}{\footnotesize (114--125), thus shares identical benchmark results.}
 \end{tabular}
 \end{table}
 
@@ -564,13 +570,13 @@ Figure~\ref{fig:e2e} visualizes the prefill and decode throughput comparison.
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig6_e2e.pdf}
-\caption{\textbf{End-to-end LLM inference: PaLU compression benefit.} Speedups are from compression, not dimension repair (see Scope Note above).}
+\caption{End-to-end LLM inference results. \emph{See Scope Note above for interpretation.}}
 \label{fig:e2e}
 \end{figure}
 
 \begin{table}[t]
 \centering
-\caption{\textbf{End-to-end LLM inference results.} The 11.5$\times$ decode speedup is from PaLU compression (reduced KV cache), not dimension repair (see Scope Note).}
+\caption{End-to-end LLM inference metrics. \emph{See Scope Note above for interpretation.}}
 \label{tab:e2e}
 \begin{tabular}{lrrr}
 \toprule
@@ -623,9 +629,10 @@ We verify that repaired linear layers produce \textbf{identical outputs} (within
 \paragraph{Limitations.}
 Our evaluation has three main limitations:
 
-\textbf{(1) Accuracy validation scope:} While unit tests confirm bit-exact preservation (30/30 passed) and our theoretical analysis proves forward-pass equivalence (\S\ref{sec:eval}.5), we have not conducted comprehensive perplexity evaluation (e.g., WikiText-2) or downstream task assessment (e.g., HellaSwag, PIQA).
-Zero-padding is mathematically equivalent to the original computation---the proof above guarantees $f_{\theta}(x) = \text{slice}(f_{\theta'}(x))$ for any input---so we expect no accuracy degradation.
-However, large-scale validation would strengthen this claim and is left as future work.
+\textbf{(1) Accuracy validation scope (Primary Gap):} While unit tests confirm bit-exact preservation (30/30 passed) and our theoretical analysis proves forward-pass equivalence, we have not conducted comprehensive perplexity evaluation (e.g., WikiText-2) or downstream task assessment (e.g., HellaSwag, PIQA).
+\emph{Why we expect zero degradation:} Zero-padding adds only $\mathbf{0}$ entries that contribute nothing to matrix multiplications or attention scores. The mathematical proof (Equation~3) guarantees $f_{\theta}(x) = \text{slice}(f_{\theta'}(x))$ for \emph{any} input---this is deterministic, not probabilistic.
+\emph{What perplexity would add:} Large-scale evaluation would demonstrate this guarantee holds across diverse input distributions at full model scale, ruling out any unforeseen numerical edge cases.
+This validation is our primary identified gap and highest-priority future work.
 
 \textbf{(2) End-to-end repair integration:} The kernel-level speedups (25--30\%) are validated on SDPA and GEMM microbenchmarks but not yet integrated into PaLU's SVD decomposition.
 PaLU represents $W_{kv} = U \cdot V^T$ where irregular dimensions reside in $U$ matrices; adapting our repair pass requires additional engineering to modify $U$ while preserving the factorization structure.
@@ -712,7 +719,13 @@ We identify three directions for future research:
 \begin{enumerate}
   \item \textbf{SVD Integration}: Adapting dimension repair to low-rank decomposition structures ($W = U \cdot V^T$), either through constrained SVD or post-compression $U$ padding.
   \item \textbf{Perplexity Validation}: Comprehensive accuracy evaluation (WikiText-2, downstream tasks) to empirically confirm our theoretical guarantee of zero accuracy degradation.
-  \item \textbf{H100 Analysis}: While our analysis focuses on A100, we expect similar alignment cliffs on H100 where TMA (Tensor Memory Accelerator) has different granularity requirements and WGMMA instructions impose their own tile constraints---potentially requiring different optimal alignment values (e.g., 32 or 64 instead of 16).
+  \item \textbf{Hardware Generalization (H100+)}: Our A100 analysis reveals alignment requirements tied to mma.sync tile sizes (K\%16). On H100 and newer architectures:
+  \begin{itemize}
+    \item TMA (Tensor Memory Accelerator) imposes different granularity for global-to-shared memory transfers
+    \item WGMMA instructions operate on 64$\times$64 warpgroup tiles, suggesting K\%64 may become optimal
+    \item Different SM counts and memory hierarchy may shift the relative impact of our identified root causes
+  \end{itemize}
+  Preliminary profiling would validate whether our Shape Contract generalizes or requires architecture-specific tuning.
 \end{enumerate}
 
 %% ===========================================
