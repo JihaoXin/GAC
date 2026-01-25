@@ -1,0 +1,50 @@
+Task: 根据最新发现更新 report.md 和 Latex
+
+Output:
+任务完成。让我总结更新内容：
+
+## 更新内容
+
+### report.md（中文报告）
+已全面更新：
+
+1. **C1 量化章节**：
+   - 1.1 PaLU 压缩后维度分布分析（96.9% 不对齐）
+   - 1.2 SDPA 延迟 vs head_dim 数据表（+88% @ D=107）
+   - 1.3 后端选择行为（MATH 比 FLASH 慢 12.6×）
+   - 1.4 Padding 修复效果（4.7% 开销换 30.5% 加速）
+   - 1.5 GEMM 对齐影响（44% 性能提升）
+
+2. **C2 原因分析章节**：
+   - 2.1 PyTorch 后端选择（已验证）
+   - 2.2 CUDA kernel 层（假设 + 计划验证）
+   - 2.3 硬件层（Tensor Core / L2 Cache / TMA）
+
+3. **C3 形式化章节**：
+   - Shape Contract 定义
+   - 维度修复算法伪代码
+
+### Latex/main.tex（英文论文）
+完整更新为 EuroMLSys 格式：
+
+- **Abstract**: 量化结果 + 贡献总结
+- **Introduction**: 动机示例 + 5 项贡献
+- **Background**: Tensor Core / FlashAttention / 低秩压缩
+- **Section 3**: 现象量化（含图表）
+- **Section 4**: 根因分析
+- **Section 5**: Shape Contract + 维度修复算法
+- **Section 6**: 评估结果（含数据表）
+- **Section 7-8**: 相关工作 + 结论
+
+编译状态：✓ 成功（3 页）
+
+### 新增图表
+- `Latex/figures/sdpa_latency.png` - SDPA 延迟 vs head_dim
+- `Latex/figures/backend_comparison.png` - 后端性能对比
+- `Latex/figures/palu_dims.png` - PaLU 维度分布
+
+### 待补充
+- C2 阶段的 CUDA kernel 和硬件层需要更多 NCU profiling 数据
+- C5 端到端 LLM 推理验证实验
+
+

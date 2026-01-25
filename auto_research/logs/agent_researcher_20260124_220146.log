@@ -1,0 +1,43 @@
+Task: 分析 2.3 Hardware layer 的实验结果，验证或推翻假设
+
+Output:
+---
+
+## 分析完成总结
+
+### C23 Hardware Layer 实验分析结果
+
+| 假设 | 验证结果 | 影响程度 | 机制说明 |
+|------|----------|----------|----------|
+| **H1: Tensor Core K%16** | ✅ **确认** | 58% slowdown | TC 利用率从 30% 降至 12% |
+| **H2: L2 cache sector** | ❌ 未确认 | 5.8% (可忽略) | 非主因 |
+| **H3: SDPA 带宽效率** | ✅ **确认** | 40% efficiency loss | 内存访问模式低效 |
+| **H4: 向量化加载** | ✅ **确认** | 50% throughput loss | float4→scalar 降级 |
+
+### 根因排序
+
+1. **Tensor Core tile alignment** - 最关键，58% slowdown
+2. **向量化加载降级** - float4→scalar，50% loss
+3. **SDPA 内存带宽效率** - 40% loss
+4. ~~L2 cache sector~~ - 5.8%，非主因
+
+### 对齐约束（基于实验推导）
+
+- **最低要求**：`head_dim % 8 == 0`（向量化加载）
+- **最优要求**：`head_dim % 16 == 0`（Tensor Core 优化）
+- **推荐值**：`{64, 96, 112, 128}`
+
+### 下一步
+
+C2 原因探究阶段**已完成**，可进入 **C3 形式化**阶段：
+1. 定义 ShapeContract 数据结构
+2. 实现 `repair_dimension()` 函数
+3. 设计内存-性能 tradeoff 参数
+
+### 更新的文件
+
+1. `report.md` - 添加了 2.3 Hardware layer 完整验证结果
+2. `findings.yaml` - 添加了 F2.3.1-F2.3.4 发现和 I4 洞察
+3. `research_state.yaml` - 标记 C2 完成，C3 就绪
+
+

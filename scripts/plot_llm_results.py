@@ -26,6 +26,8 @@ def plot_prefill(baseline_raw, palu_raw, out_dir: Path):
     def extract(data):
         xs, ys = [], []
         for m in data:
+            if "error" in m:
+                continue
             xs.append(m["seq_len"])
             ys.append(m["timing"]["mean"])
         order = np.argsort(xs)
@@ -49,6 +51,8 @@ def plot_prefill_throughput(baseline_raw, palu_raw, out_dir: Path):
     def extract(data):
         xs, ys = [], []
         for m in data:
+            if "error" in m:
+                continue
             xs.append(m["seq_len"])
             ys.append(m["throughput_toks_per_s"]["mean"])
         order = np.argsort(xs)
@@ -70,10 +74,11 @@ def plot_decode_throughput(baseline_raw, palu_raw, out_dir: Path):
     base = baseline_raw.get("decode", [])
     palu = palu_raw.get("decode", [])
     def extract(data):
-        ctxs, gens, thr = [], [], []
+        ctxs, thr = [], []
         for m in data:
+            if "error" in m:
+                continue
             ctxs.append(m["context_len"])
-            gens.append(m["gen_len"])
             thr.append(m["throughput_toks_per_s"]["mean"])
         return ctxs, thr
     cb, tb = extract(base)
@@ -95,6 +100,8 @@ def plot_memory(baseline_raw, palu_raw, out_dir: Path):
     def extract(data):
         xs, ys = [], []
         for m in data:
+            if "error" in m:
+                continue
             xs.append(m["seq_len"])
             ys.append(m["memory"]["max_memory_allocated"] / (1024**3))
         order = np.argsort(xs)

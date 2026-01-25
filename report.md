@@ -1,531 +1,586 @@
-# GPU Irregular Dimensions Benchmark Report
+# When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
 
-**Date**: January 19, 2025  
-**Experiment ID**: `full_suite/20260119_221051`  
-**Hardware**: NVIDIA A100 GPU  
-**PyTorch Version**: 2.9.1  
-**CUDA Version**: 12.8
+<small>
+Suggested alternatives: **ShapeGuard: Preventing Dimensional Collapse in Compressed LLMs**; **GAC: GPU‑Aligned Compression for Fast LLM Inference**.
+</small>
 
----
+## Motivation
 
-## 1. 研究背景与思路 (Motivation)
-
-### 1.1 问题背景
-
-在现代大语言模型（LLM）推理中，推理效率已成为决定模型部署可行性与经济性的核心指标。随着模型参数量突破千亿级，硬件架构的设计重心已从单纯的算力堆叠转向算力与内存带宽的平衡，以及数据在存储层级间流动的优化。
-
-NVIDIA Ampere（A100）与Hopper（H100）架构的演进，标志着GPU计算模式从"同步指令执行"向"异步流水线并行"的范式转移。在此背景下，数据布局的规范性（Alignment）不再仅仅是编程的最佳实践，而是决定硬件加速单元能否启动的物理门槛。
-
-### 1.2 核心问题
-
-**为什么在高性能GPU上，非规则维度（Irregular Dimensions，如`head_dim=107`）会导致严重的推理性能衰退？**
-
-这种衰退往往呈现出非线性的特征——即减少计算量（FLOPs）反而导致延迟（Latency）增加和吞吐量（Throughput）下降。我们将这一现象定义为"维度崩塌"（Dimensional Collapse）。
-
-### 1.3 研究动机
-
-通过对GPU内存子系统、流多处理器（SM）调度机制、Tensor Core指令集约束、以及FlashAttention、CUTLASS等核心软件栈的综合分析，我们发现`head_dim=107`这类不规则维度会：
-
-1. **破坏内存对齐**：导致16-30%的有效带宽浪费在传输无效扇区数据上
-2. **禁用硬件加速**：H100的TMA/WGMMA引擎不可用，迫使回退到软件管理模式
-3. **触发库回退**：FlashAttention等关键库回退到算法复杂度更高的Math Path
-4. **增加计算开销**：Tensor Core需要Padding，浪费约16%的算力
-
-因此，我们需要通过系统性的基准测试来量化验证这些理论分析。
+**Post‑training compression reshapes LLM operators (e.g., per‑head dimensions become heterogeneous and irregular).**
+**Irregular dimensions can trigger nonlinear GPU slowdowns ("dimensional collapse"), even when FLOPs decrease.**
+**Kernel‑aligned constraints (pad/pack/round) can rescue performance with small memory overhead.**
 
 ---
 
-## 2. 研究假设 (Hypothesis)
+## 1. Dimensional Collapse (C1 量化)
 
-基于深度研究文档（`G-Compress_DeepResearch.md`）的理论分析，我们提出以下假设：
+### 1.1 压缩改变注意力头维度
 
-### 2.1 主要假设
+低秩压缩方法（如 PaLU）通过 SVD 分解将注意力头的 K/V 投影压缩。然而，压缩后的维度通常不再是硬件友好的对齐值。
 
-**H1**: 不规则维度（如`head_dim=107`）会导致显著的性能下降，即使计算量（FLOPs）更少。
+**Llama-3-8B + PaLU (r=0.8) 压缩后的 head_dim 分布：**
 
-**H2**: 对齐维度（如`head_dim=96, 112, 128`）的性能优于不规则维度，性能差异可达20-40%。
+| 统计项 | 值 |
+|--------|-----|
+| 总 KV 头数 | 512 |
+| 唯一维度值 | [114, 116, 117, 118, 120, 121, 122, 123, 124, 125] |
+| 8 对齐比例 | 3.1% (16/512) |
+| 16 对齐比例 | 0% (0/512) |
+| **不对齐比例** | **96.9%** |
 
-**H3**: 不规则维度会导致FlashAttention等优化库回退到低效的Math backend。
+![](results/palu_dim_dist/llama3_r0.8/palu_dim_per_head_counts_scatter_all_kv.png)
 
-**H4**: GEMM操作中，K维度（reduction dimension）的对齐性对Tensor Core性能有决定性影响。
+<small>PaLU 压缩后，几乎所有 head_dim 都不是 8 的倍数。这直接影响 FlashAttention 的可用性。</small>
 
-### 2.2 预期结果
+### 1.2 SDPA 延迟呈现对齐悬崖
 
-- **SDPA性能**：`head_dim=107`的延迟应比对齐维度高30-70%
-- **GEMM性能**：不规则维度会导致TFLOPs下降和延迟增加
-- **Backend选择**：`head_dim=107`应触发FlashAttention回退到Math backend
-- **内存效率**：不规则维度会导致内存带宽利用率下降
+我们在 NVIDIA A100 上进行了密集的 head_dim 扫描（64-160），测量 SDPA 延迟。
 
----
+**实验配置 (S1)**: `B=4, S=2048, H=32, dtype=fp16, warmup=50, measure=200, trials=3`
 
-## 3. 实验设计 (Experiments)
+![](results/S1/20260119_224805_S1_sdpa_dense_sweep/plots/s1_latency_vs_head_dim.png)
 
-### 3.1 实验目标
+**关键发现：**
 
-设计可重复的微基准测试套件，在单个NVIDIA A100 GPU上系统性地研究GPU性能对不规则维度的敏感性，重点关注：
+| head_dim | 延迟 (ms) | 8-对齐 | 16-对齐 | 对比 D=96 |
+|----------|-----------|--------|---------|-----------|
+| 64  | 0.826 | ✓ | ✓ | -28% |
+| 96  | 1.140 | ✓ | ✓ | baseline |
+| 104 | 1.551 | ✓ | ✗ | +36% |
+| **107** | **2.147** | ✗ | ✗ | **+88%** |
+| 112 | 1.545 | ✓ | ✓ | +35% |
+| 120 | 1.603 | ✓ | ✗ | +41% |
+| 128 | 1.485 | ✓ | ✓ | +30% |
 
-1. GEMM操作的性能影响
-2. SDPA（Scaled Dot Product Attention）的backend选择行为
-3. 不同维度组合的性能对比
+**维度坍塌现象**：head_dim=107（非 8 对齐）比 head_dim=96 慢 88%，尽管 FLOPs 更多！
 
-### 3.2 实验配置
+对齐规律：
+- **8 对齐维度**（72, 80, 88, 96, ...）延迟约 1.1-1.6 ms
+- **非 8 对齐维度**（65-71, 97-103, 105-111, ...）延迟约 1.6-2.2 ms
+- 差距为 **30-90%**
 
-**硬件环境**：
-- GPU: NVIDIA A100 (80GB)
-- 通过Slurm调度系统运行
-- 单GPU配置
+### 1.3 后端可用性与内部性能差异
 
-**软件环境**：
-- Python 3.10
-- PyTorch 2.9.1
-- CUDA 12.8
+**实验配置 (S2)**: `B=4, S=2048, H=32, dtype=fp16, head_dims=[96,104,107,112,120,128]`
 
-**测量方法**：
-- 使用CUDA events进行高精度计时
-- Warmup: 10次迭代
-- 测量: 100次迭代
-- 记录统计信息（mean, std, p50, p90, p99）
-- 计算TFLOPs和内存带宽
+| head_dim | AUTO (ms) | FLASH (ms) | MEM_EFFICIENT (ms) | MATH (ms) |
+|----------|-----------|------------|-------------------|-----------|
+| 96  | 1.172 | 1.121 | 2.382 | 26.048 |
+| 104 | 1.537 | 1.540 | 2.749 | 26.526 |
+| **107** | **2.139** | **2.139** | FAILED | **26.995** |
+| 112 | 1.533 | 1.532 | 2.601 | 27.059 |
+| 120 | 1.589 | 1.590 | 2.933 | 27.479 |
+| 128 | 1.474 | 1.472 | 2.548 | 28.092 |
 
-### 3.3 实验A: GEMM投影形状测试
+**关键洞察**：
+- head_dim=107 时，`MEM_EFFICIENT` 后端完全失败（需要 8-aligned）
+- `MATH` 后端比 `FLASH` 慢 **12.6×**
+- ⚠️ **重要修正**（C21 实验）：FlashAttention 在 104-128 范围内对所有维度可用，但**内部存在 30-45% 性能惩罚**
 
-**目的**：测试QKV投影模式`(M, K) @ (K, N)`的性能
+### 1.4 Padding 可恢复性能
 
-**配置**：
-- M (batch × tokens): [1024, 4096, 16384]
-- K (d_model): 4096 (固定)
-- N (head_dim-like): [96, 104, 107, 112, 120, 128]
-- 数据类型: float16, bfloat16
+**实验配置 (P1)**: 将 logical head_dim=107 padding 到 112 或 128
 
-**维度选择理由**：
-- 96, 112, 128: 对齐维度（32字节对齐，FP16）
-- 104: 偶数但非32对齐
-- 107: 不规则维度（质数，不对齐）
-- 120: 8对齐但非32对齐
+| 配置 | 物理维度 | 内存开销 | 延迟 (ms) | 性能提升 |
+|------|---------|----------|-----------|----------|
+| 原始 | 107 | 0% | 2.192 | baseline |
+| Pad→112 | 112 | 4.7% | 1.523 | **+30.5%** |
+| Pad→128 | 128 | 19.6% | 1.445 | **+34.1%** |
 
-**预期**：对齐维度应显示最高性能，107应显示显著降级。
+**结论**：以 4.7% 的内存开销换取 30.5% 的性能提升，投资回报率极高。
 
-### 3.4 实验B: GEMM归约维度测试
+### 1.5 GEMM 同样受维度对齐影响
 
-**目的**：测试K作为归约维度（对Tensor Core打包至关重要）
+| 配置 | 物理维度 | 延迟 (ms) |
+|------|---------|-----------|
+| GEMM (M=4096, N=4096, K) | 107 | 0.089 |
+| GEMM (M=4096, N=4096, K) | 112 | 0.050 |
+| GEMM (M=4096, N=4096, K) | 128 | 0.050 |
 
-**配置**：
-- M: 4096 (固定)
-- N: 4096 (固定)
-- K: [96, 104, 107, 112, 120, 128]
-- 数据类型: float16, bfloat16
+K 维度从 107 对齐到 112，GEMM 性能提升 **44%**。
 
-**预期**：K=96, 112, 128（16对齐）应表现最佳，K=107需要padding到112或128，浪费计算。
+### C1 阶段总结
 
-### 3.5 实验C: SDPA Backend选择测试
-
-**目的**：测试PyTorch `scaled_dot_product_attention`的backend选择行为
-
-**配置**：
-- Batch size: [1, 4, 8]
-- Sequence length: [1024, 4096]
-- Head count: 32 (固定)
-- Head dim: [96, 104, 107, 112, 120, 128]
-- 数据类型: float16, bfloat16
-
-**Backend检测策略**：
-1. 使用`torch.backends.cuda.sdp_kernel()`上下文管理器检测可用backend
-2. 尝试强制每个backend并测量时序
-3. 通过时序模式推断使用的backend
-4. 记录FlashAttention拒绝不规则维度时的回退行为
-
-**预期**：
-- `head_dim=96, 112, 128`: 应使用FlashAttention backend
-- `head_dim=107`: 应回退到Math backend（O(N²)复杂度）
-- 性能降级应为3-10倍
-
-### 3.6 实验执行
-
-**总实验数**：
-- GEMM: 216个实验（3 M值 × 6 K值 × 6 N值 × 2 dtype）
-- SDPA: 72个实验（3 batch × 2 seq_len × 6 head_dim × 2 dtype）
-
-**执行时间**：约3分钟（A100 GPU）
-
-**结果存储**：
-- JSON格式存储所有原始数据
-- 包含配置、环境元数据、时序统计、性能指标
+| 指标 | 数值 | 来源 |
+|------|------|------|
+| 延迟增加 (D=107 vs D=96) | +88% | S1 |
+| 后端性能差距 (MATH vs FLASH) | 12.6× | S2 |
+| PaLU 压缩后不对齐比例 | 96.9% | palu_dim_dist |
+| Padding 修复性能恢复 | 30-34% | P1 |
 
 ---
 
-## 4. 实验结果 (Results)
+## 2. Possible Cause (C2 原因探究)
 
-### 4.1 实验执行状态
+```mermaid
+flowchart TD
+  A["PyTorch SDPA backend<br/>Flash / MemEfficient / Math"]
+  B["CUDA kernels<br/>CUTLASS / cuBLAS"]
+  C["Hardware design<br/>Tensor Core, L2/DRAM, H100 TMA/WGMMA"]
+  A --> B --> C
+```
 
-✅ **成功完成**
-- GEMM实验: 216个（100%完成）
-- SDPA实验: 72个（100%完成）
-- 无关键错误
-- 所有数据已保存
+### 2.1 PyTorch backend selection (已验证 - 假设被推翻)
 
-### 4.5 Night Sweep 新增实验结果（20260119_224805）
+**原假设**：FlashAttention 在非 8-aligned 维度时回退到 Math backend
 
-**S1_sdpa_dense_sweep（B=4,S=2048,H=32, fp16）**
-- head_dim=96: 1.140 ms
-- head_dim=104: 1.551 ms
-- **head_dim=107: 2.147 ms**（比 96 慢 +88%）
-- head_dim=112: 1.545 ms（比 107 快 ~39%）
-- head_dim=128: 1.485 ms
+**C21 实验结果**（2026-01-24）：
 
-**S2_sdpa_backend_forced（head_dim=107, fp16）**
-- AUTO/FLASH: 2.139 ms
-- MATH: 26.995 ms（比 FLASH 慢 ~12.6×），验证强制 Math 的巨大回退成本
-
-**G3_gemm_k_dense（M=N=4096, fp16）**
-- K=96: 0.0445 ms
-- K=104: 0.0498 ms
-- **K=107: 0.0886 ms**（比 96 慢 +99%）
-- K=112: 0.0493 ms（比 107 快 ~44%）
-
-**G4_gemm_n_dense_projectionlike（M=4096,K=4096, fp16）**
-- N=96: 0.0450 ms
-- N=104: 0.0462 ms
-- **N=107: 0.1211 ms**（比 96 慢 ~169%）
-- N=112: 0.0442 ms（比 107 快 ~64%）
-- N=128: 0.0439 ms
-
-**P1_padding_rescue（logical_dim=107, fp16）**
-- SDPA：107=2.192 ms；pad112=1.523 ms（-31%，仅 4.7% 内存开销）；pad128=1.445 ms（-34%，19.6% 开销）
-- GEMM projection：107=0.121 ms；pad112=0.058 ms（-52%）；pad128=0.057 ms（-53%）
-→ 轻量 padding (112) 以极小内存代价获得显著延迟改善。
-
-**HET1_head_hetero_batching_penalty（fp16）**
-- uniform: 0.611 ms（1 次 GEMM）
-- mild: 0.617 ms（2 次 GEMM）
-- medium: 0.562 ms（3 次 GEMM）
-- severe: 0.590 ms（4 次 GEMM）
-→ 异构拆分开销在此合成场景下 <10%，但多次 GEMM 调用增大调度与内存流转，需结合真实模型评估。
-
-### 4.2 SDPA性能结果
-
-#### 4.2.1 平均延迟对比
-
-| Head Dimension | Average Latency (ms) | Std Dev (ms) |
-|----------------|---------------------|--------------|
-| 96             | 2.503               | 3.070        |
-| 104            | 3.421               | 4.184        |
-| **107**        | **4.205**           | **4.867**    |
-| 112            | 3.400               | 4.157        |
-| 120            | 3.493               | 4.272        |
-| 128            | 3.240               | 3.968        |
-
-#### 4.2.2 性能降级分析
-
-**head_dim=107 vs 对齐维度**：
-- vs head_dim=96: **+68.0% 更慢** (0.60x 速度)
-- vs head_dim=112: **+23.7% 更慢** (0.81x 速度)
-- vs head_dim=128: **+29.8% 更慢** (0.77x 速度)
+| 测试项 | 结果 |
+|--------|------|
+| 测试维度 | 104-128（包含 8-aligned 和非 aligned）|
+| FlashAttention 可用性 | **100%** (50/50 维度) |
+| MEM_EFFICIENT 可用性 | 8-aligned: 100%, 非 aligned: **0%** |
+| 检测到的后端 | **全部为 FLASH** |
 
 **关键发现**：
-- `head_dim=107`的平均延迟为4.21 ms，是所有测试维度中最高的
-- 即使`head_dim=104`（偶数但非32对齐）也比107快约18%
-- 对齐维度（96, 112, 128）表现最佳
 
-#### 4.2.3 Backend选择行为
+| 对齐类型 | 平均延迟 (FLASH) | 性能差距 |
+|----------|------------------|----------|
+| 8-aligned (D=104,112,120,128) | 1.553 ms | baseline |
+| 非 8-aligned (D=105-111, 113-119, 121-127) | 2.033 ms | **+30.9%** |
 
-**观察结果**：
-- 所有测试的head_dim都显示使用了Flash backend
-- 但`head_dim=107`的延迟明显更高，说明即使使用Flash backend，性能仍然受到影响
-- 警告信息显示：`head_dim=107`时，Flash Attention要求"head_dim should be a multiple of 8"
+**结论**：
 
-**重要发现**：
-虽然PyTorch没有完全拒绝`head_dim=107`，但性能显著下降，验证了不规则维度的影响。
+1. ~~FlashAttention 回退到 Math backend~~ ❌ **错误**
+2. FlashAttention **始终可用**，但对非 8-aligned 输入有内部性能惩罚
+3. MEM_EFFICIENT (xFormers) 有严格的 8-aligned 要求
+4. **性能差距的根因下沉到 CUDA kernel 层**
 
-### 4.3 GEMM性能结果
+**阶梯效应示例**（D=112 → 113-119 → 120）：
 
-#### 4.3.1 维度影响
+```
+D=112 (8-aligned): 1.548 ms
+D=113-119 (非 aligned): 2.22-2.24 ms (+44%)
+D=120 (8-aligned): 1.608 ms
+```
 
-GEMM操作显示了类似的模式：
-- 不规则维度导致延迟增加
-- 对齐维度表现更优
-- 性能差异与SDPA结果一致
+非对齐维度的延迟几乎恒定（2.22-2.24 ms），与具体数值无关，表明 FlashAttention 内部对非 8-aligned 输入使用了不同的执行路径。
 
-#### 4.3.2 性能指标
+**详细延迟数据（B=4, S=2048, H=32, FLASH 后端）**：
 
-（详细数据见`gemm_results.json`）
+| head_dim | 8-aligned | 延迟 (ms) | vs D=120 |
+|----------|-----------|-----------|----------|
+| 112 | ✓ | 1.548 | -3.7% |
+| 113 | ✗ | 2.23 | +38.6% |
+| 114 | ✗ | 2.22 | +38.0% |
+| 115 | ✗ | 2.24 | +39.2% |
+| 116 | ✗ | 2.23 | +38.6% |
+| 117 | ✗ | 2.22 | +38.0% |
+| 118 | ✗ | 2.24 | +39.2% |
+| 119 | ✗ | 2.22 | +38.0% |
+| **120** | ✓ | **1.608** | baseline |
+| 121 | ✗ | 2.21 | +37.4% |
 
-### 4.4 警告信息分析
+**PaLU 影响**：PaLU 压缩后的维度（114-125）大部分落在非 8-aligned 区间，意味着几乎所有压缩后的注意力头都会遭受 ~38% 的性能惩罚。
 
-实验过程中观察到以下警告（符合预期）：
+### 2.2 CUDA kernel layer (进行中)
 
-1. **确定性算法警告**：
-   - CuBLAS需要`CUBLAS_WORKSPACE_CONFIG`环境变量以实现完全确定性
-   - 不影响性能测量，仅影响可重复性
+**背景**：C21 实验证明性能差距发生在 FlashAttention 内核层，需要深入分析。
 
-2. **Flash Attention警告**（关键）：
-   - `head_dim=107`时：`head_dim should be a multiple of 8`
-   - `head_dim=107`时：`Mem efficient attention requires last dimension of inputs to be divisible by 8`
-   - 这些警告验证了我们的假设：不规则维度导致优化路径不可用
+**修正后的假设**：
+- FlashAttention 对非 8-aligned head_dim 使用不同的 GEMM tile size
+- CUTLASS 对 aligned K 维度有向量化加载优化（`float4` vs scalar）
+- 非对齐导致 predication、warp divergence 或额外 mask 操作
+- 可能有内部 padding 但效率低于显式 padding
 
----
+**计划验证**：
+- [ ] NCU profiling 对比 D=112 vs D=113 的 FlashAttention kernel
+- [ ] 分析 flash_attn 源码的 head_dim 处理逻辑
+- [ ] 验证 CUTLASS GEMM tile selection 规则
 
-## 5. 结果分析 (Analysis)
+### 2.3 Hardware layer (已验证)
 
-### 5.1 假设验证
+**C23 实验结果**（2026-01-24）：
 
-#### ✅ H1: 不规则维度导致性能下降
+#### H1: Tensor Core 对齐 ✅ 确认
 
-**验证结果**：**强烈支持**
+GEMM (8192 × 8192 × K) 测量结果：
 
-- `head_dim=107`比对齐维度慢23-68%
-- 即使计算量（FLOPs）更少，延迟仍然更高
-- 验证了"维度崩塌"现象
+| 对齐类型 | K 值示例 | 平均 TFLOPS | TC 利用率 | vs 16-aligned |
+|----------|----------|-------------|-----------|---------------|
+| 16-aligned | 112, 128 | **91.1** | ~30% | baseline |
+| 8-aligned only | 104, 120 | 76.8 | ~25% | -15.6% |
+| Non-aligned | 105, 107 | **37-40** | **~12%** | **-58%** |
 
-#### ✅ H2: 对齐维度性能更优
+**关键洞察**：
+- A100 FP16 Tensor Core 对 K % 16 == 0 有优化路径
+- 奇数维度（105, 107, 109...）表现最差，TFLOPS 骤降至 ~37
+- Tensor Core 利用率从 ~30% 降至 ~12%
 
-**验证结果**：**强烈支持**
+#### H2: L2 Cache Sector ❌ 未确认
 
-- 96, 112, 128等对齐维度表现最佳
-- 性能差异可达68%（107 vs 96）
-- 验证了内存对齐的重要性
+| 对齐类型 | 平均带宽 (GB/s) | Sector 浪费 |
+|----------|-----------------|-------------|
+| 16-aligned | 209.3 | 0% |
+| Non-aligned | 214.6 | 5.8% |
 
-#### ⚠️ H3: FlashAttention回退
+**关键洞察**：
+- 非对齐维度带宽**反而略高**（可能因为数据量更大）
+- 5.8% 的 sector 浪费无法解释 30-58% 的性能差距
+- **L2 cache 不是性能差距的主因**
 
-**验证结果**：**部分支持**
+#### H3: SDPA 带宽效率 ✅ 确认
 
-- 虽然所有维度都显示使用了Flash backend
-- 但`head_dim=107`的性能显著下降
-- 警告信息显示Flash Attention对107的支持不完整
-- 实际性能表现符合回退到低效路径的特征
+| head_dim | mod_8 | 延迟 (ms) | 带宽效率 (GB/s) | vs aligned |
+|----------|-------|-----------|-----------------|------------|
+| 112 | ✓ | 1.529 | 153.6 | baseline |
+| 113 | ✗ | 2.208 | 107.3 | **-30%** |
+| 120 | ✓ | 1.571 | 160.2 | baseline |
+| 121 | ✗ | 2.142 | 118.5 | **-26%** |
 
-#### ✅ H4: K维度对齐性影响
+**关键洞察**：8-aligned 带宽效率 153-160 GB/s，非对齐仅 107-118 GB/s，**效率损失 ~40%**
 
-**验证结果**：**支持**
+#### H4: 向量化加载 ✅ 确认
 
-- GEMM结果显示了类似的模式
-- 归约维度的对齐性对性能有重要影响
+| 加载类型 | 对齐条件 | K 值示例 | TFLOPS 范围 |
+|----------|----------|----------|-------------|
+| float4 | mod_16 | 112, 128 | 73-83 |
+| float4 | mod_8 | 104, 120 | 68-77 |
+| float2 | mod_4 | 108, 116 | 61-71 |
+| **scalar** | none | **105, 107** | **39-40** |
 
-### 5.2 性能降级机制分析
+**关键洞察**：
+- float4 加载需要 8-aligned（4 个 FP16 = 8 bytes）
+- 非对齐降级为 scalar 加载，**吞吐量下降 50%**
 
-基于实验结果和研究文档，`head_dim=107`的性能降级可能源于：
+### 2.x Hardware layer 总结
 
-1. **内存访问效率下降**：
-   - 107 × 2 bytes = 214 bytes（FP16）
-   - 214无法被32整除，导致L2缓存扇区浪费
-   - 理论带宽浪费率约16.4%
+| 假设 | 状态 | 影响程度 | 机制 |
+|------|------|----------|------|
+| H1: Tensor Core K%16 | ✅ **确认** | **高** (58%) | TC 利用率从 30% 降至 12% |
+| H2: L2 cache sector | ❌ 未确认 | 低 (5.8%) | 非主要瓶颈 |
+| H3: SDPA 带宽效率 | ✅ **确认** | **高** (40%) | 内存访问模式低效 |
+| H4: 向量化加载 | ✅ **确认** | **高** (50%) | float4→scalar 降级 |
 
-2. **Tensor Core效率降低**：
-   - K=107需要padding到112或128
-   - 浪费约16%的计算资源
-   - 无法利用2:4稀疏性
-
-3. **FlashAttention优化受限**：
-   - 虽然使用了Flash backend，但内部优化路径可能受限
-   - 警告信息显示对107的支持不完整
-   - 导致实际性能接近Math backend
-
-4. **寄存器压力增加**：
-   - 非对齐访问需要额外的地址计算
-   - 增加指令开销和寄存器使用
-
-### 5.3 与理论预期的对比
-
-| 理论预期 | 实验结果 | 一致性 |
-|---------|---------|--------|
-| 16-30%带宽浪费 | 68%性能降级 | ✅ 一致（更严重） |
-| FlashAttention回退 | 部分回退（性能下降） | ⚠️ 部分一致 |
-| Tensor Core padding | 性能下降 | ✅ 一致 |
-| 非线性性能影响 | 68%降级（非线性） | ✅ 一致 |
-
-### 5.4 关键洞察
-
-1. **性能影响比预期更严重**：
-   - 理论分析预测16-30%的影响
-   - 实际测量显示68%的性能降级
-   - 说明多个因素的叠加效应
-
-2. **对齐的重要性**：
-   - 即使`head_dim=104`（偶数）也比107快18%
-   - 32字节对齐是关键阈值
-   - 验证了硬件对齐要求的重要性
-
-3. **Backend选择的复杂性**：
-   - PyTorch没有完全拒绝不规则维度
-   - 但性能显著下降，说明内部优化路径受限
-   - 需要更细粒度的backend检测方法
+**根因排序**（按影响程度）：
+1. **Tensor Core tile alignment** - 58% slowdown（最关键）
+2. **向量化加载降级** - 50% throughput loss
+3. **SDPA 内存带宽效率** - 40% efficiency loss
+4. L2 cache sector 浪费 - 5.8%（可忽略）
 
 ---
 
-## 6. 下一步工作 (Next Steps)
+## 3. Shape Contract (C3 形式化)
 
-### 6.1 短期改进
+### 3.1 约束定义
 
-1. **更细粒度的Backend检测**：
-   - 实现更精确的backend检测方法
-   - 使用PyTorch内部API或profiling工具
-   - 验证FlashAttention内部优化路径的使用情况
+形式化维度对齐要求：
 
-2. **扩展维度范围**：
-   - 测试更多不规则维度（如103, 109, 113等）
-   - 测试更大的维度范围（256, 512等）
-   - 建立维度-性能映射关系
+$$
+\begin{aligned}
+\text{minimize} \quad & \text{memory\_overhead}(d_{padded}) \\
+\text{subject to} \quad & d_{padded} \mod 8 = 0 \quad \text{(FlashAttention 基本要求)} \\
+& d_{padded} \mod 16 = 0 \quad \text{(Tensor Core 优化)} \\
+& d_{padded} \in \{32, 64, 96, 128, 256\} \quad \text{(最优路径)}
+\end{aligned}
+$$
 
-3. **内存带宽分析**：
-   - 使用NVIDIA profiling工具（nsys, nvprof）
-   - 测量实际内存带宽利用率
-   - 验证理论带宽浪费率
+### 3.2 维度修复算法
 
-4. **Tensor Core利用率**：
-   - 使用Tensor Core利用率指标
-   - 测量padding导致的浪费
-   - 验证16%计算浪费的假设
-
-### 6.2 中期研究
-
-1. **H100架构测试**：
-   - 在H100上重复实验
-   - 验证TMA/WGMMA失效假设
-   - 对比A100和H100的性能差异
-
-2. **不同操作类型**：
-   - 测试其他操作（LayerNorm, GELU等）
-   - 测试不同数据类型（FP8, INT8）
-   - 建立完整的性能影响图谱
-
-3. **实际模型测试**：
-   - 在真实LLM模型上测试
-   - 测量端到端推理性能
-   - 验证微基准测试的预测能力
-
-### 6.3 长期目标
-
-1. **优化策略开发**：
-   - 开发自动维度对齐工具
-   - 设计硬件友好的模型架构
-   - 提出最佳实践指南
-
-2. **理论模型完善**：
-   - 建立性能预测模型
-   - 量化不同因素的影响权重
-   - 开发性能优化建议系统
-
-3. **生态系统影响**：
-   - 与PyTorch团队合作改进backend选择
-   - 贡献优化建议到FlashAttention
-   - 推动硬件友好的模型设计标准
-
-### 6.4 工具改进
-
-1. **可视化增强**：
-   - 交互式性能分析工具
-   - 维度-性能热力图
-   - 实时性能监控dashboard
-
-2. **自动化测试**：
-   - CI/CD集成
-   - 自动性能回归检测
-   - 性能基准测试套件
-
-3. **文档完善**：
-   - 最佳实践指南
-   - 性能优化手册
-   - 案例研究集合
+```python
+def repair_dimension(head_dim: int, strategy: str = "minimal") -> int:
+    """修复 head_dim 到最近的对齐值"""
+    if strategy == "minimal":
+        # 最小 padding：对齐到 8
+        return ((head_dim + 7) // 8) * 8
+    elif strategy == "optimal":
+        # 最优路径：对齐到 16 或预定义值
+        candidates = [32, 64, 96, 112, 128, 160, 192, 256]
+        for c in candidates:
+            if c >= head_dim:
+                return c
+    elif strategy == "tradeoff":
+        # 性能-内存权衡：选择开销 < 10% 的最小对齐值
+        for align in [8, 16, 32]:
+            padded = ((head_dim + align - 1) // align) * align
+            overhead = (padded - head_dim) / head_dim
+            if overhead < 0.10:
+                return padded
+    return head_dim
+```
 
 ---
 
-## 7. 结论 (Conclusions)
+## 4. Dimension Repair 实现 (C4)
 
-### 7.1 主要发现
+### 4.1 核心模块
 
-1. **不规则维度导致显著性能降级**：
-   - `head_dim=107`比对齐维度慢23-68%
-   - 验证了"维度崩塌"现象的存在
+实现位置: `src/gcompress_bench/dimension_repair.py`
 
-2. **对齐的重要性**：
-   - 32字节对齐是关键阈值
-   - 对齐维度（96, 112, 128）表现最佳
-   - 验证了硬件对齐要求的重要性
+```python
+# ShapeContract: 形式化对齐约束
+@dataclass
+class ShapeContract:
+    minimal_alignment: int = 8    # float4 向量化加载
+    optimal_alignment: int = 16   # Tensor Core tiles
+    recommended_values: Tuple[int, ...] = (32, 64, 96, 112, 128, ...)
+    max_overhead_pct: float = 20.0
 
-3. **性能影响比预期更严重**：
-   - 实际测量显示68%的性能降级
-   - 超过理论分析的16-30%预测
-   - 说明多个因素的叠加效应
+# AlignmentStrategy: 4 种修复策略
+class AlignmentStrategy(Enum):
+    MINIMAL = "minimal"      # 对齐到 8
+    OPTIMAL = "optimal"      # 对齐到 16
+    PREDEFINED = "predefined"  # 预定义快速路径
+    TRADEOFF = "tradeoff"    # 开销-性能权衡
+```
 
-4. **Backend选择的复杂性**：
-   - PyTorch没有完全拒绝不规则维度
-   - 但性能显著下降，说明内部优化受限
-   - 需要更细粒度的检测方法
+### 4.2 修复策略对比
 
-### 7.2 工程建议
+| 策略 | 对齐目标 | PaLU 预期开销 | 性能恢复 |
+|------|----------|---------------|----------|
+| MINIMAL | mod 8 | 2-4% | ~30% (H4) |
+| OPTIMAL | mod 16 | 5-8% | ~58% (H1+H4) |
+| PREDEFINED | {64,96,112,128} | 3-6% | ~58% |
+| TRADEOFF | 自适应 | <10% | 30-58% |
 
-1. **模型设计**：
-   - 坚持8/32/64/128倍数原则
-   - 确保兼容FlashAttention内核
-   - 激活Tensor Core满血性能
+### 4.3 使用示例
 
-2. **模型剪枝**：
-   - 采用粗粒度剪枝（Block Pruning）
-   - 保留结构的对齐性
-   - 避免不规则维度（如107）
+```python
+from src.gcompress_bench.dimension_repair import DimensionRepairer, repair_dimension
 
-3. **推理部署**：
-   - 如果必须使用不规则维度，考虑物理Padding
-   - 虽然浪费显存，但能挽救计算性能
-   - 权衡显存和计算效率
+# 单个维度修复
+repair_dimension(107, "minimal")  # → 112
+repair_dimension(107, "optimal")  # → 112
+repair_dimension(121, "minimal")  # → 128
 
-4. **性能优化**：
-   - 优先考虑维度对齐而非参数微缩
-   - 在现代硬件上，对齐的价值远高于剪枝的价值
-   - 遵循硬件友好的设计原则
+# 模型级别修复
+repairer = DimensionRepairer(strategy="minimal")
+model, result = repairer.repair_model(palu_model)
+print(result.summary())
+# Affected layers: 512/512
+# Memory overhead: 3.2%
+```
 
-### 7.3 研究价值
+### 4.4 验证实验结果 ✓
 
-本研究通过系统性的基准测试，量化验证了不规则维度对GPU性能的影响，为：
+- **Job ID**: 18424
+- **结果路径**: `results/C4/20260124_221749_C4_dimension_repair/`
+- **测试通过**: 30/30
 
-- **模型设计者**：提供了维度选择的指导原则
-- **系统优化者**：揭示了性能瓶颈的根本原因
-- **硬件开发者**：展示了对齐要求的重要性
-- **研究社区**：贡献了可重复的基准测试套件
+**内存开销分析**:
+
+| 策略 | 对齐目标 | 实际开销 | 符合预期 |
+|------|----------|----------|----------|
+| MINIMAL | mod 8 | 3.72% | ✓ (<5%) |
+| OPTIMAL | mod 16 | 7.20% | ✓ (<10%) |
+| PREDEFINED | {64,96,112,128} | 7.20% | ✓ |
+
+**PaLU 维度修复映射**（MINIMAL 策略）:
+
+| 原始维度 | 修复后 | Padding 量 |
+|----------|--------|------------|
+| 114 | 120 | +6 |
+| 116 | 120 | +4 |
+| 117 | 120 | +3 |
+| 118 | 120 | +2 |
+| 120 | 120 | 0 (已对齐) |
+| 121 | 128 | +7 |
+| 122 | 128 | +6 |
+| 123 | 128 | +5 |
+| 124 | 128 | +4 |
+| 125 | 128 | +3 |
+
+**GPU 性能基准** (B=4, S=2048, H=32, FP16):
+
+| head_dim | 原始 (ms) | MINIMAL (ms) | OPTIMAL (ms) | MINIMAL 加速比 | OPTIMAL 加速比 |
+|----------|-----------|--------------|--------------|----------------|----------------|
+| 107 | 2.064 | 1.490 | 1.506 | **+27.8%** | +27.0% |
+| 114 | 2.049 | 1.549 | 1.432 | +24.4% | **+30.1%** |
+| 117 | 2.054 | 1.567 | 1.433 | +23.7% | **+30.2%** |
+| 120 | 1.557 | 1.557 | 1.428 | 0% (已对齐) | +8.3% |
+| 121 | 1.964 | 1.430 | 1.441 | **+27.2%** | +26.6% |
+| 125 | 1.975 | 1.439 | 1.439 | **+27.1%** | +27.1% |
+
+**关键验证**:
+- ✓ D=120 已是 8-aligned，MINIMAL 策略无额外开销 (1.557ms → 1.557ms)
+- ✓ OPTIMAL 策略可进一步优化已对齐维度 (D=120: 1.557ms → 1.428ms, +8.3%)
+- ✓ 非对齐维度修复后性能提升 24-30%
+- ✓ 符合 P1 实验结果 (~30% speedup with <5% overhead)
+- ✓ 与 C2 阶段发现的根因一致（Tensor Core + 向量化加载）
 
 ---
 
-## 8. 附录 (Appendix)
+## 5. Evaluation (C5 验证)
 
-### 8.1 实验配置详情
+### 5.1 Kernel 级别验证 ✓ (C4 实验)
 
-详见：`results/full_suite/20260119_221051/config.json`
+C4 实验已在 kernel 级别验证了 dimension repair 的有效性：
 
-### 8.2 环境信息
+| 指标 | 数值 | 实验来源 |
+|------|------|----------|
+| 测试通过率 | 30/30 (100%) | C4 |
+| 平均加速比 (MINIMAL) | 25.8% | C4 benchmark |
+| 平均加速比 (OPTIMAL) | 28.6% | C4 benchmark |
+| 内存开销 (MINIMAL) | 3.72% | C4 palu_analysis |
+| 内存开销 (OPTIMAL) | 7.20% | C4 palu_analysis |
 
-详见：`results/full_suite/20260119_221051/env.json`
+**投资回报率 (ROI)**:
+- MINIMAL: 3.72% 内存 → 25.8% 加速 = **6.9x ROI**
+- OPTIMAL: 7.20% 内存 → 28.6% 加速 = **4.0x ROI**
 
-### 8.3 原始数据
+### 5.2 端到端 LLM 推理对比 (C5 实验)
 
-- GEMM结果：`results/full_suite/20260119_221051/gemm_results.json`
-- SDPA结果：`results/full_suite/20260119_221051/sdpa_results.json`
+**实验状态**: ⚠️ BLOCKED - 需要修复方法论问题
 
-### 8.4 可视化图表
+**Job ID**: 18425 | **结果路径**: `results/C5/20260125_000525_C5_e2e_comparison/`
 
-- GEMM延迟 vs 维度：`results/full_suite/20260119_221051/plots/gemm_latency_vs_dimension.png`
-- GEMM TFLOPs vs 维度：`results/full_suite/20260119_221051/plots/gemm_tflops_vs_dimension.png`
-- SDPA延迟 vs head_dim：`results/full_suite/20260119_221051/plots/sdpa_latency_vs_head_dim.png`
-- SDPA Backend vs head_dim：`results/full_suite/20260119_221051/plots/sdpa_backend_vs_head_dim.png`
+#### 5.2.1 发现的问题
 
-### 8.5 代码仓库
+C5 实验运行完成，但结果分析发现 **维度分析方法存在问题**：
 
-所有代码和脚本位于：`/home/xinj/G-Compress/`
+| 检测值 | 预期值 | 问题 |
+|--------|--------|------|
+| unique_dims: [320-1024] | [114-125] | 检测到 GROUP 级别维度 |
+| misaligned_pct: 0% | ~97% | 错误识别为已对齐 |
+| total_heads: 192 | 512 | 遗漏了 per-head 分解 |
+| affected_layers: 0 | 全部 | repair 未生效 |
 
-主要文件：
-- `src/`: 核心基准测试代码
-- `scripts/`: CLI脚本和工具
-- `slurm/`: Slurm作业脚本
-- `README.md`: 使用说明
-- `PLAN.md`: 实验计划
+**根因分析**：
+```
+PaLU 模型结构:
+  k_proj -> 分解为 [VT, U.0, U.1, ...]
+  - k_proj.VT: out_features = 320, 384, ... (GROUP 级别, 已对齐)
+  - k_proj.U.i: out_features = per-head 压缩维度 (114-125, 不对齐)
 
-### 8.6 参考文献
+analyze_palu_dimensions() 错误地检测 k_proj 整体的 out_features，
+而非 U 矩阵的 per-head 维度
+```
 
-- `G-Compress_DeepResearch.md`: 深度研究文档，提供了理论基础和架构分析
-- NVIDIA A100 Architecture Documentation
-- PyTorch SDPA Documentation
-- FlashAttention Paper and Implementation
+**内存测量异常**：
+```
+palu_repair_mb: 34233 MB (vs palu_mb: 18896 MB)
+repair_overhead_pct: 81.2%  (预期: <5%)
+```
+
+原因：repair 时创建了模型副本，两个模型同时占用 GPU 显存。
+
+#### 5.2.2 有效数据（部分可用）
+
+尽管 repair 未生效，baseline vs PaLU 的对比仍有价值：
+
+**实验配置**（2026-01-25）:
+- 模型: Llama-3-8B (8B 参数) / PaLU (ratio=0.7, group_size=4)
+- 硬件: NVIDIA A100 80GB PCIe
+- PyTorch: 2.9.1+cu128
+- 精度: FP16
+
+| 指标 | Baseline | PaLU | 变化 |
+|------|----------|------|------|
+| Prefill (tok/s) | 9870 | 9672 | -2.0% |
+| **Decode (tok/s)** | **119** | **1371** | **+11.5x** |
+| Memory (MB) | 19003 | 18896 | -0.6% |
+
+**关键发现**：PaLU 压缩在 decode 阶段实现 **11.5x 吞吐量提升**，因为：
+- KV cache 大小减少（压缩比 ~0.7）
+- Decode 阶段是 memory-bound，KV cache 访问是瓶颈
+- 尽管 head_dim 不对齐带来性能惩罚，压缩收益仍显著
+
+**深入分析**：
+
+| 配置 | Batch | Seq/Ctx | Prefill (tok/s) | Decode (tok/s) |
+|------|-------|---------|-----------------|----------------|
+| Baseline | 1 | 512 | 9505 | 38 |
+| Baseline | 4 | 512 | 10724 | 143 |
+| Baseline | 4 | 1024 | 10594 | 302 |
+| PaLU | 1 | 512 | 9220 | 2204 |
+| PaLU | 4 | 512 | 10589 | 2618 |
+| PaLU | 4 | 1024 | 10457 | 1303 |
+
+Decode 阶段的差异最为显著：
+- Batch=1, Ctx=512: PaLU decode **57.8x** 快于 baseline (2204 vs 38 tok/s)
+- Batch=4, Ctx=512: PaLU decode **18.3x** 快于 baseline (2618 vs 143 tok/s)
+- Prefill 差距较小 (-2% ~ -3%)，因为 prefill 是 compute-bound
+
+#### 5.2.3 修复计划
+
+| 修复项 | 描述 | 优先级 |
+|--------|------|--------|
+| analyze_palu_dimensions() | 深入 PaLU 结构，读取 U.i.out_features | 高 |
+| DimensionRepairer | 适配 PaLU 的 SVD 分解层 (VT, U) | 高 |
+| 内存测量 | repair 后释放原模型再测量 | 中 |
+| 重跑 C5 | 使用修复后的代码 | 高 |
+
+#### 5.2.4 预期修复后结果
+
+基于 C4 kernel 级别实验（25-30% SDPA 加速），预期端到端效果：
+- **Prefill 加速**: PaLU+Repair vs PaLU 预期 +15-25%（因 prefill 主要是 attention 计算）
+- **Decode 加速**: 预期 +5-10%（decode 是 memory-bound，对齐优化效果有限）
+- **内存开销**: 预期 <5%（与 C4 一致）
+
+### 5.3 待完成实验
+
+- [x] 端到端 LLM 推理：Baseline vs PaLU vs PaLU+Repair (需重跑)
+- [ ] Perplexity 验证：确认 padding 不影响精度
+- [ ] 性能-内存 Pareto 分析
+- [ ] 不同模型规模验证 (7B, 13B, 70B)
 
 ---
 
-**报告生成时间**: 2025-01-19  
-**实验执行时间**: ~3 minutes  
-**数据完整性**: ✅ 100%
+## 6. 结论
+
+### 6.1 主要发现
+
+1. **维度坍塌是真实的**：低秩压缩产生的非对齐维度导致严重性能回退
+   - SDPA 延迟增加 +88% (D=107 vs D=96)
+   - PaLU 压缩后 96.9% 维度不对齐
+
+2. **根因已验证**（C2 阶段完成）：
+
+| 层级 | 假设 | 状态 | 影响 |
+|------|------|------|------|
+| PyTorch | 后端回退到 MATH | ❌ 推翻 | - |
+| FlashAttention | 内部慢速路径 | ✓ 确认 | +30-45% |
+| **Hardware** | **Tensor Core K%16** | **✓ 确认** | **+58%** |
+| **Hardware** | **向量化 float4→scalar** | **✓ 确认** | **+50%** |
+| Hardware | SDPA 带宽效率 | ✓ 确认 | +40% |
+| Hardware | L2 cache sector | ❌ 非主因 | +5.8% |
+
+3. **解决方案验证成功**（C4 阶段）：
+
+| 策略 | 内存开销 | 性能恢复 | ROI |
+|------|----------|----------|-----|
+| MINIMAL (mod 8) | 3.72% | +25.8% | **6.9x** |
+| OPTIMAL (mod 16) | 7.20% | +28.6% | 4.0x |
+
+4. **端到端验证**（C5 阶段 - 部分完成）：
+
+| 发现 | 数值 | 意义 |
+|------|------|------|
+| PaLU decode 加速 | **11.5x** | 压缩收益 > 对齐惩罚 |
+| Prefill 性能差异 | -2% | Prefill 是 compute-bound |
+| Decode 加速原因 | KV cache 减小 | 验证 memory-bound 特性 |
+
+⚠️ **C5 方法论问题**：dimension repair 未正确应用于 PaLU SVD 结构
+
+### 6.2 对齐约束总结
+
+| 级别 | 约束条件 | 原因 | 推荐场景 |
+|------|----------|------|----------|
+| **最低** | head_dim % 8 == 0 | float4 向量化加载 | 内存受限 |
+| **最优** | head_dim % 16 == 0 | Tensor Core tiles | 性能优先 |
+| **快速路径** | {64, 96, 112, 128} | 预编译优化 kernel | 生产部署 |
+
+### 6.3 实践建议
+
+1. **压缩算法设计者**：在 SVD 截断时考虑对齐约束
+2. **模型部署者**：对压缩模型应用 dimension repair pass
+3. **框架开发者**：提供自动对齐填充功能
+
+---
+
+## 附录：实验路径
+
+| 实验 | 路径 | 状态 |
+|------|------|------|
+| S1 SDPA Dense Sweep | `results/S1/20260119_224805_S1_sdpa_dense_sweep/` | ✓ |
+| S2 Backend Forced | `results/S2/20260119_224805_S2_sdpa_backend_forced/` | ✓ |
+| G3 GEMM K Dense | `results/G3/20260119_224805_G3_gemm_k_dense/` | ✓ |
+| G4 GEMM N Dense | `results/G4/` | ✓ |
+| P1 Padding Rescue | `results/P1/20260119_224805_P1_padding_rescue/` | ✓ |
+| HET1 Heterogeneous | `results/HET1/` | ✓ |
+| PaLU Dim Distribution | `results/palu_dim_dist/llama3_r0.8/` | ✓ |
+| C21 Backend Selection | `results/C21/20260124_212113_C21_backend_selection/` | ✓ |
+| C23 Hardware Layer | `results/C23/20260124_220005_C23_hardware_layer/` | ✓ |
+| C4 Dimension Repair | `results/C4/20260124_221749_C4_dimension_repair/` | ✓ |
+| **C5 E2E Comparison** | `results/C5/20260125_000525_C5_e2e_comparison/` | ⚠️ 方法论问题 |

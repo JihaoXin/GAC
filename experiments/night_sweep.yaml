@@ -76,3 +76,57 @@ experiments:
     warmup: 50
     measure: 200
     trials: 3
+
+  # C2.1 PyTorch Backend Selection Verification
+  C21_backend_selection:
+    type: sdpa_backend_selection
+    description: "Verify PyTorch SDPA backend selection boundaries"
+    dtype: fp16
+    shapes:
+      - {batch: 4, seq_len: 2048, n_heads: 32}
+      - {batch: 1, seq_len: 4096, n_heads: 32}
+    # Test all head_dims from 112-128 (PaLU common range)
+    # plus boundary cases around 8-alignment
+    head_dims: [
+      # 8-aligned (should use Flash)
+      112, 120, 128,
+      # PaLU typical dims (non-8-aligned, should fallback)
+      113, 114, 115, 116, 117, 118, 119,
+      121, 122, 123, 124, 125, 126, 127,
+      # Additional boundary tests
+      104, 105, 106, 107, 108, 109, 110, 111
+    ]
+    backends: [AUTO, FLASH, MEM_EFFICIENT, MATH]
+    warmup: 50
+    measure: 200
+    trials: 3
+    # Record which backend is actually selected for AUTO mode
+    detect_backend: true
+
+  # C2.3 Hardware Layer Analysis
+  C23_hardware_layer:
+    type: hardware_analysis
+    description: "Analyze hardware-level factors: Tensor Core, L2 cache, bandwidth"
+    dtype: fp16
+    hypotheses:
+      H1: "Tensor Core requires K % 16 == 0 for optimal FP16 performance"
+      H2: "L2 cache 32-byte sector causes over-fetch for non-aligned strides"
+      H3: "Non-aligned dims cause bandwidth efficiency loss"
+      H4: "Vectorized loads (float4) require head_dim % 8 == 0"
+    tests:
+      tensor_core:
+        M: 8192
+        N: 8192
+        K_range: [104, 128]
+        metric: TFLOPS
+      l2_cache:
+        M: 2048
+        head_dims: [104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128]
+        metric: bandwidth_efficiency
+      vectorized_loads:
+        M: 4096
+        N: 4096
+        K_values: [104, 105, 107, 108, 112, 116, 120, 124, 128]
+        metric: TFLOPS
+    warmup: 30
+    measure: 100

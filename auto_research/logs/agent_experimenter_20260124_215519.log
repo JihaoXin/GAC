@@ -1,0 +1,48 @@
+Task: 针对 C2 的 2.3 Hardware layer，设计并提交实验
+
+Output:
+现在让我总结实验结果：
+
+## 实验设计
+
+**目的**：验证 C2 2.3 Hardware layer 的假设
+- H1: Tensor Core 要求 K % 16 == 0
+- H2: L2 cache sector 32 bytes 导致 over-fetch
+- H3: Memory bandwidth 浪费
+- H4: 向量化加载 (float4) 需要 head_dim % 8 == 0
+
+**配置**：
+- GPU: NVIDIA A100-SXM4-40GB
+- GEMM 测试: 8192 × 8192 × K (K = 104-128)
+- L2 测试: 2048 × head_dim (head_dim = 104-128)
+- SDPA 测试: B=4, S=2048, H=32
+
+## 创建的脚本
+
+1. **`scripts/run_c23_hardware_analysis.py`**：独立的硬件层分析脚本，包含 4 个分析模块
+2. **`slurm/run_c23_hardware_analysis.sbatch`**：Slurm 作业脚本
+3. **更新 `experiments/night_sweep.yaml`**：添加 C23 实验配置
+
+## 提交结果
+
+- **Job ID**: 18423 (成功完成)
+- **运行时间**: ~6 秒
+- **结果路径**: `results/C23/20260124_220005_C23_hardware_layer/`
+
+## 关键发现
+
+| 假设 | 结果 | 详情 |
+|------|------|------|
+| H1: Tensor Core 16-aligned | ✓ CONFIRMED | 16-aligned: 91.1 TFLOPS, non-aligned: 58.1 TFLOPS (58.1% slowdown) |
+| H2: L2 cache sector 浪费 | ✗ NOT CONFIRMED | 非对齐带宽 214.6 GB/s vs 对齐 209.3 GB/s，浪费仅 5.8% |
+| H3: SDPA 带宽效率 | ✓ CONFIRMED | D=112: 153.6 GB/s, D=113: 107.3 GB/s (~40% 下降) |
+| H4: 向量化加载 | ✓ CONFIRMED | float4 (8-aligned): 68-83 TFLOPS, scalar: 39-40 TFLOPS |
+
+## 下一步
+
+作业完成后需要分析：
+1. 整合 2.1 (PyTorch layer) 和 2.3 (Hardware layer) 的发现
+2. 确定是否需要 2.2 (CUDA kernel layer) 的 NCU profiling
+3. 进入 C3 形式化阶段，定义 Shape Contract
+
+

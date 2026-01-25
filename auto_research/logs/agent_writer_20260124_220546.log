@@ -1,0 +1,56 @@
+Task: 根据最新发现更新 report.md 和 Latex
+
+Output:
+## 更新内容
+
+### report.md
+- 附录实验路径表：新增 C21 和 C23 实验的结果路径
+
+### Latex/main.tex
+
+1. **摘要 (Abstract)**：
+   - 更新为反映最新 C21/C23 实验发现
+   - 澄清 FlashAttention 不会回退，而是使用内部慢速路径
+   - 加入量化的硬件层根因（Tensor Core 58%、向量化 50%、带宽 40%）
+   - 明确 L2 cache 不是主因
+
+2. **第 4.3 节 Hardware Constraints**：
+   - 全面重写，加入 C23 实验的详细数据
+   - 新增 Table 3: Hardware layer root cause analysis
+   - 新增 Table 4: Vectorized load patterns and GEMM throughput
+   - 四个假设的验证状态和量化影响
+   - 根因优先级排序
+
+3. **第 8 节 Conclusion**：
+   - 更新硬件层发现的 bullet points
+   - 加入具体数字（58%/50%/40%/5.8%）
+
+## 图表状态
+
+论文引用的图表已存在：
+- `Latex/figures/sdpa_latency.png` ✓
+- `Latex/figures/backend_comparison.png` ✓
+- `Latex/figures/palu_dims.png` ✓
+
+报告引用的图表已存在：
+- `results/S1/.../plots/s1_latency_vs_head_dim.png` ✓
+- `results/palu_dim_dist/llama3_r0.8/palu_dim_per_head_counts_scatter_all_kv.png` ✓
+
+## 待补充（C3-C5 阶段）
+
+当前研究进入 **C3 形式化阶段**，以下内容需要后续补充：
+
+1. **C3 形式化**：
+   - ShapeContract 数据结构的正式定义
+   - repair_dimension() 函数的完整实现
+
+2. **C4 求解器**：
+   - 完整的 padding/packing 策略实现
+   - 端到端集成代码
+
+3. **C5 验证**：
+   - 端到端 LLM 推理对比（Baseline vs PaLU vs PaLU+Repair）
+   - Perplexity 验证
+   - 性能-内存 Pareto 分析图
+
+

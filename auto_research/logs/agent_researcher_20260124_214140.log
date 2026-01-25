@@ -1,0 +1,54 @@
+Task: 分析 2.1 PyTorch backend selection 的实验结果，验证或推翻假设
+
+Output:
+## 分析总结
+
+### 当前状态
+**C2_probe 阶段** - 2.1 PyTorch backend selection（已完成）
+
+### 数据分析
+
+C21 实验测试了 head_dim 从 104-128 的所有维度，覆盖两种配置（B=4,S=2048 和 B=1,S=4096），每个维度测试了 4 种后端（AUTO, FLASH, MEM_EFFICIENT, MATH）。
+
+**核心数据**：
+
+| 维度类型 | FLASH 延迟 | MEM_EFFICIENT | 后端检测 |
+|----------|------------|---------------|----------|
+| 8-aligned (104,112,120,128) | 1.55 ms | ✓ 可用 | FLASH |
+| 非 8-aligned (105-111, 113-119, 121-127) | 2.03 ms (+31%) | ✗ 不可用 | FLASH |
+
+### 关键发现
+
+1. **F2.1.1**: FlashAttention 在 104-128 范围内对**所有维度都可用**（100%），包括非 8-aligned 维度
+2. **F2.1.2**: MEM_EFFICIENT 后端**仅对 8-aligned 维度可用**（8/8 vs 0/42）
+3. **F2.1.3**: FlashAttention 内部对非 8-aligned 输入有 **30-45% 的性能惩罚**
+4. **F2.1.4**: 非对齐维度的延迟呈**阶梯状**分布，几乎恒定在 2.2 ms
+
+### 假设验证
+
+| 假设 | 结论 |
+|------|------|
+| "FlashAttention 在非对齐维度时回退到 Math backend" | **❌ 推翻** |
+| "后端选择是性能差距的根因" | **❌ 推翻** |
+| "性能问题发生在 FlashAttention 内核层" | **✓ 支持** |
+
+### 下一步建议
+
+1. **2.2 CUDA kernel layer 分析**（优先级：HIGH）
+   - 使用 NCU profiling 对比 D=112 vs D=113 的 FlashAttention kernel
+   - 分析 flash_attn 源码中 head_dim 的处理逻辑
+   - 验证 CUTLASS GEMM tile selection 规则
+
+2. **具体实验设计**
+   - C22: `ncu --set full python benchmark_sdpa.py --head_dim 112,113`
+   - C23: 阅读 `flash_attn/flash_attn_triton.py` 或 `flash_attn/flash_attn_cuda.cu`
+   - C24: GEMM micro-benchmark with CUTLASS
+
+### 文件更新
+
+已更新：
+- `auto_research/state/findings.yaml` - 添加 F2.1.1-F2.1.4 和 I3
+- `auto_research/state/research_state.yaml` - 更新 2.1 状态为 completed，2.2 为 next
+- `report.md` - 更新 2.1 节内容，标注假设被推翻
+
+

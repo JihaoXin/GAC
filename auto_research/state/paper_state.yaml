@@ -1,0 +1,35 @@
+# GAC 论文审稿状态
+# 由 orchestrator.py --mode paper 自动管理
+
+status: in_progress  # in_progress | accepted | rejected
+
+# 目标评分
+target_score: 8  # >= 8/10 则 accept
+
+# 当前评分
+current_score: 0
+
+# 审稿历史
+reviews: []
+# 格式:
+# - iteration: 1
+#   timestamp: 2025-01-25T10:00:00
+#   score: 5
+#   log: auto_research/logs/orchestrator_paper_xxx.log
+
+# 论文元信息
+paper:
+  title: "When Smaller Is Slower: Dimensional Collapse in Compressed LLMs"
+  venue: EuroMLSys
+  template: SIGPLAN (acmart)
+  format:
+    columns: 2
+    pages: 6  # 不含引用
+    font_size: 10pt
+
+# 审稿重点
+review_focus:
+  - technical_quality: 40%
+  - presentation: 30%
+  - innovation: 20%
+  - writing: 10%

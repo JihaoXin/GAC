@@ -1,0 +1,47 @@
+Task: 根据最新发现更新 report.md 和 Latex
+
+Output:
+更新完成。让我提供一个总结：
+
+## 更新内容
+
+### report.md
+- **第 5.2 节 (C5 验证)**: 
+  - 添加了详细的问题分析（维度检测错误：GROUP 级别 vs per-head 级别）
+  - 添加了内存测量异常说明（81.2% 开销原因：两模型同时在 GPU）
+  - 添加了实验配置详情（A100 80GB, PyTorch 2.9.1, FP16）
+  - 添加了详细的性能数据表格（不同 batch/seq_len 组合）
+  - 添加了 5.2.4 预期修复后结果
+  
+- **第 6.1 节 (结论)**: 
+  - 新增第 4 点「端到端验证」总结
+  - 标注 C5 方法论问题
+
+- **附录**: 添加 C5 实验路径
+
+### Latex/main.tex
+- **新增 5.5 小节 "End-to-End LLM Inference (C5)"**:
+  - 添加 Table 6 (e2e 性能对比)
+  - 记录 PaLU 11.5x decode 加速
+  - 讨论 repair 实现的局限性
+  - 预估修复后的性能提升
+
+- **第 8 节 (Conclusion)**: 
+  - 添加 C5 端到端发现
+  - 更新 future work
+
+## 新增图表
+- 无（数据来自 `results/C5/` 的 JSON 文件）
+
+## 待补充
+1. **修复 C5 实验方法论**后需要更新的内容：
+   - `analyze_palu_dimensions()` 修复后重跑实验
+   - 用真实的 repair vs palu 对比数据替换当前的「预期值」
+   - 内存测量修复后更新内存开销数据
+
+2. **待完成实验**：
+   - Perplexity 验证（确认 padding 不影响精度）
+   - 性能-内存 Pareto 分析
+   - 不同模型规模验证 (7B, 13B, 70B)
+
+

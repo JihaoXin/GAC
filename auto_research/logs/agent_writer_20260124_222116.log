@@ -1,0 +1,36 @@
+Task: 根据最新发现更新 report.md 和 Latex
+
+Output:
+## 更新内容
+
+### report.md 更新
+- **4.4 节**：添加了完整的 C4 验证实验数据
+  - PaLU 维度修复映射表（114→120, 121→128 等）
+  - 详细的 GPU 性能基准（包含 MINIMAL 和 OPTIMAL 加速比）
+  - 关键验证点说明
+- **5.1 节**：新增 Kernel 级别验证总结
+  - 投资回报率 (ROI) 分析：MINIMAL 6.9x, OPTIMAL 4.0x
+- **6. 结论**：重构为结构化表格
+  - 6.1 主要发现（根因验证表格）
+  - 6.2 对齐约束总结
+  - 6.3 实践建议
+
+### Latex/main.tex 更新
+- **Background 2.2**：修正 FlashAttention 约束描述（移除"回退到 Math"的错误说法）
+- **Evaluation 6.3**：新增 Dimension Repair Validation 子节
+  - Table 6: Memory overhead analysis
+  - Table 7: SDPA latency before/after repair
+  - Table 8: PaLU dimension mapping
+- **Conclusion**：更新数据为实际验证结果（3.72%→25-28%, 7.20%→27-30%）
+
+### 状态更新
+- `research_state.yaml`: 
+  - `latex_compiles: true`
+  - `report_complete: true`
+
+## 待补充
+- **C5 端到端验证**：需要完整 LLM 推理实验（Baseline vs PaLU vs PaLU+Repair）
+- **Perplexity 验证**：确认 padding 不影响模型精度
+- **论文图表**：可能需要生成 C4 实验的可视化图表（dimension repair speedup bar chart）
+
+

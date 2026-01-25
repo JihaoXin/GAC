@@ -1,0 +1,103 @@
+Task: 设计并运行端到端 LLM 推理对比实验
+
+Output:
+作业正在运行中。让我提供实验设计的完整总结。
+
+---
+
+## 实验设计
+
+- **目的**：验证 C5 端到端 LLM 推理性能，对比 Baseline、PaLU、PaLU+Repair 三种变体
+- **假设**：维度修复可以在不显著增加内存的情况下恢复 PaLU 压缩模型的推理性能
+
+### 配置
+
+| 参数 | 值 |
+|------|-----|
+| Prefill batches | [1, 4] |
+| Prefill seq_lens | [256, 512, 1024, 2048] |
+| Decode batches | [1, 4] |
+| Decode context | [512, 1024] |
+| Decode gen_lens | [64, 128] |
+| Warmup | 10 |
+| Measure | 30 |
+| Trials | 3 |
+| Repair strategy | minimal (mod 8) |
+
+### 预期结果
+
+| 指标 | 预期值 |
+|------|--------|
+| Prefill 加速 (PaLU+Repair vs PaLU) | 20-30% |
+| Decode 加速 (PaLU+Repair vs PaLU) | 15-25% |
+| 内存开销 | <5% |
+
+---
+
+## 创建的脚本
+
+### 1. 实验脚本
+- **路径**: `scripts/run_c5_e2e_comparison.py`
+- **内容**:
+  - 加载 Baseline (Llama-3-8B-Instruct)、PaLU、PaLU+Repair 三种模型
+  - 分析 PaLU 维度分布
+  - 应用 DimensionRepairer 进行维度修复
+  - 执行 prefill/decode 基准测试
+  - 计算对比指标
+  - 生成 markdown 报告
+
+### 2. Slurm 脚本
+- **路径**: `slurm/run_c5_e2e_comparison.sbatch`
+- **配置**:
+  - GPU: A100 80GB (`--constraint=gpu_a100_80gb`)
+  - 时间: 4 小时
+  - 内存: 100GB
+
+---
+
+## 提交结果
+
+- **Job ID**: 18425
+- **状态**: RUNNING
+- **节点**: acclnode06
+- **预计运行时间**: 2-4 小时
+- **结果路径**: `results/C5/`
+
+---
+
+## 下一步
+
+作业完成后需要分析：
+
+1. **性能对比**
+   - Prefill throughput (tok/s): Baseline vs PaLU vs PaLU+Repair
+   - Decode throughput (tok/s): 各变体对比
+   - 性能恢复率：(PaLU+Repair - PaLU) / (Baseline - PaLU)
+
+2. **内存分析**
+   - 各变体的 peak memory usage
+   - 维度修复的实际内存开销
+   - 压缩率 vs 性能的 tradeoff
+
+3. **维度修复效果**
+   - 修复前后的维度分布
+   - 对齐率变化（misaligned → 8-aligned）
+   - 各策略（minimal/optimal）的效果对比
+
+4. **更新报告**
+   - 将 C5 实验结果添加到 `report.md`
+   - 更新 `research_state.yaml` 完成状态
+   - 如结果符合预期，可标记 `C5_validated: true`
+
+---
+
+可以使用以下命令监控作业进度：
+```bash
+# 查看作业状态
+squeue -j 18425
+
+# 查看实时日志
+tail -f slurm_logs/18425_C5_e2e_comparison.out
+```
+
+

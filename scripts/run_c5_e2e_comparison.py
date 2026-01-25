@@ -1,0 +1,631 @@
+#!/usr/bin/env python3
+"""
+C5 End-to-End LLM Inference Comparison
+
+Compares three model variants:
+1. Baseline: Original Llama-3-8B-Instruct
+2. PaLU: Compressed with PaLU (misaligned dimensions)
+3. PaLU+Repair: PaLU with dimension repair applied
+
+Metrics:
+- Prefill latency (tok/s)
+- Decode throughput (tok/s)
+- Memory usage
+- Perplexity (accuracy validation)
+
+Usage:
+    python scripts/run_c5_e2e_comparison.py --out results/C5 [--smoke]
+"""
+
+import argparse
+import json
+import sys
+from dataclasses import dataclass, field, asdict
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Add project paths
+sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "third_party" / "palu"))
+
+from src.gcompress_bench.metrics import measure_kernel, compute_stats, memory_stats, reset_memory
+from src.gcompress_bench.palu_loader import load_palu_model
+from src.gcompress_bench.dimension_repair import DimensionRepairer, repair_dimension, ShapeContract
+from environment import collect_environment
+
+
+@dataclass
+class BenchmarkConfig:
+    """Configuration for C5 benchmark."""
+    prefill_batches: List[int] = field(default_factory=lambda: [1, 4])
+    prefill_seq_lens: List[int] = field(default_factory=lambda: [256, 512, 1024, 2048])
+    decode_batches: List[int] = field(default_factory=lambda: [1, 4])
+    decode_ctx_lens: List[int] = field(default_factory=lambda: [512, 1024])
+    decode_gen_lens: List[int] = field(default_factory=lambda: [64, 128])
+    warmup: int = 10
+    measure: int = 30
+    trials: int = 3
+    dtype: str = "float16"
+    device: str = "cuda:0"
+    repair_strategy: str = "minimal"  # minimal, optimal, predefined, tradeoff
+
+
+@dataclass
+class VariantResult:
+    """Results for a single variant."""
+    variant: str
+    prefill_results: List[Dict]
+    decode_results: List[Dict]
+    memory_peak_mb: float
+    model_params: int
+    repair_info: Optional[Dict] = None
+
+
+def load_baseline_model(device: str, dtype: torch.dtype):
+    """Load original Llama-3-8B model."""
+    model_id = "meta-llama/Meta-Llama-3-8B-Instruct"
+    tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=dtype,
+        device_map="auto" if device.startswith("cuda") else None,
+    )
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
+    return model, tokenizer
+
+
+def load_palu_model_variant(device: str, dtype: torch.dtype):
+    """Load PaLU compressed model."""
+    model, tokenizer, palu_dir = load_palu_model(device=device, torch_dtype=dtype)
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
+    return model, tokenizer, palu_dir
+
+
+def analyze_palu_dimensions(model) -> Dict:
+    """Analyze dimension distribution in PaLU model."""
+    dims = []
+    aligned_8 = 0
+    aligned_16 = 0
+    total = 0
+
+    for name, module in model.named_modules():
+        if hasattr(module, 'weight') and isinstance(module, torch.nn.Linear):
+            # Look for compressed dimensions in attention layers
+            if any(proj in name.lower() for proj in ['k_proj', 'v_proj']):
+                dim = module.out_features
+                dims.append(dim)
+                total += 1
+                if dim % 8 == 0:
+                    aligned_8 += 1
+                if dim % 16 == 0:
+                    aligned_16 += 1
+
+    return {
+        "unique_dims": sorted(set(dims)),
+        "total_heads": total,
+        "aligned_8_count": aligned_8,
+        "aligned_16_count": aligned_16,
+        "aligned_8_pct": 100.0 * aligned_8 / total if total > 0 else 0,
+        "aligned_16_pct": 100.0 * aligned_16 / total if total > 0 else 0,
+        "misaligned_pct": 100.0 * (total - aligned_8) / total if total > 0 else 0,
+    }
+
+
+def apply_dimension_repair(model, strategy: str = "minimal") -> Tuple[torch.nn.Module, Dict]:
+    """Apply dimension repair to PaLU model."""
+    repairer = DimensionRepairer(strategy=strategy)
+
+    # Analyze before repair
+    before_analysis = analyze_palu_dimensions(model)
+
+    # Compute repair plan
+    plan = repairer.compute_repair_plan(model)
+
+    # Apply repair
+    repaired_model, result = repairer.repair_model(model, inplace=False)
+
+    # Analyze after repair
+    after_analysis = analyze_palu_dimensions(repaired_model)
+
+    repair_info = {
+        "strategy": strategy,
+        "before": before_analysis,
+        "after": after_analysis,
+        "memory_overhead_pct": result.memory_overhead_pct,
+        "affected_layers": len(result.affected_layers),
+        "repair_mapping": {
+            str(k): {"original": v[0], "repaired": v[1]}
+            for k, v in list(plan.items())[:20]  # Sample first 20
+        },
+    }
+
+    return repaired_model, repair_info
+
+
+def gen_input(tokenizer, batch: int, seq_len: int, device: str):
+    """Generate input tensors for benchmarking."""
+    prompt_ids = tokenizer("Hello", return_tensors="pt").input_ids.to(device)
+    repeat = torch.cat([prompt_ids] * batch, dim=0)
+    if repeat.shape[1] < seq_len:
+        pad_id = tokenizer.eos_token_id or 0
+        pad = torch.full((batch, seq_len - repeat.shape[1]), pad_id, device=device, dtype=repeat.dtype)
+        repeat = torch.cat([repeat, pad], dim=1)
+    else:
+        repeat = repeat[:, :seq_len]
+    attn = torch.ones_like(repeat, device=device)
+    return repeat, attn
+
+
+def benchmark_prefill(model, tokenizer, config: BenchmarkConfig) -> List[Dict]:
+    """Benchmark prefill (prompt processing) performance."""
+    results = []
+    device = config.device
+
+    for b in config.prefill_batches:
+        for s in config.prefill_seq_lens:
+            print(f"  Prefill: batch={b}, seq_len={s}", end="", flush=True)
+            input_ids, attention_mask = gen_input(tokenizer, b, s, device)
+            reset_memory()
+
+            def fn():
+                with torch.inference_mode():
+                    model(input_ids=input_ids, attention_mask=attention_mask)
+
+            try:
+                res = measure_kernel(fn, warmup=config.warmup, measure=config.measure,
+                                    trials=config.trials, device=device)
+                mem = memory_stats()
+                tokens = b * s
+                throughput = [tokens / (t / 1000.0) for t in res["times_ms"]]
+
+                result = {
+                    "batch": b,
+                    "seq_len": s,
+                    "latency_ms": res["stats"],
+                    "throughput_toks_per_s": compute_stats(throughput),
+                    "memory_mb": mem.get("peak_mb", 0),
+                }
+                results.append(result)
+                print(f" -> {res['stats']['mean']:.2f}ms, {compute_stats(throughput)['mean']:.0f} tok/s")
+
+            except RuntimeError as e:
+                print(f" -> ERROR: {str(e)[:50]}")
+                results.append({
+                    "batch": b,
+                    "seq_len": s,
+                    "error": str(e),
+                })
+                del input_ids, attention_mask
+                torch.cuda.empty_cache()
+                break  # Skip larger seq_lens for this batch
+
+            del input_ids, attention_mask
+            torch.cuda.empty_cache()
+
+    return results
+
+
+def benchmark_decode(model, tokenizer, config: BenchmarkConfig) -> List[Dict]:
+    """Benchmark decode (autoregressive generation) performance."""
+    results = []
+    device = config.device
+
+    for b in config.decode_batches:
+        for ctx in config.decode_ctx_lens:
+            for gen in config.decode_gen_lens:
+                print(f"  Decode: batch={b}, ctx={ctx}, gen={gen}", end="", flush=True)
+                input_ids, attention_mask = gen_input(tokenizer, b, ctx, device)
+                gen_kwargs = dict(max_new_tokens=gen, do_sample=False, temperature=0.0, top_k=0)
+                reset_memory()
+
+                def fn():
+                    with torch.inference_mode():
+                        model.generate(input_ids=input_ids, attention_mask=attention_mask, **gen_kwargs)
+
+                try:
+                    res = measure_kernel(fn, warmup=config.warmup // 2, measure=config.measure,
+                                        trials=config.trials, device=device)
+                    mem = memory_stats()
+                    tokens = b * gen
+                    throughput = [tokens / (t / 1000.0) for t in res["times_ms"]]
+
+                    result = {
+                        "batch": b,
+                        "context_len": ctx,
+                        "gen_len": gen,
+                        "latency_ms": res["stats"],
+                        "throughput_toks_per_s": compute_stats(throughput),
+                        "memory_mb": mem.get("peak_mb", 0),
+                    }
+                    results.append(result)
+                    print(f" -> {res['stats']['mean']:.2f}ms, {compute_stats(throughput)['mean']:.1f} tok/s")
+
+                except RuntimeError as e:
+                    print(f" -> ERROR: {str(e)[:50]}")
+                    results.append({
+                        "batch": b,
+                        "context_len": ctx,
+                        "gen_len": gen,
+                        "error": str(e),
+                    })
+                    del input_ids, attention_mask
+                    torch.cuda.empty_cache()
+                    break  # Skip larger gen_lens
+
+                del input_ids, attention_mask
+                torch.cuda.empty_cache()
+
+    return results
+
+
+def compute_perplexity(model, tokenizer, device: str, max_tokens: int = 4096) -> Dict:
+    """Compute perplexity on a small validation set."""
+    # Use a simple test corpus
+    test_text = """
+    Artificial intelligence is transforming the way we interact with technology.
+    Large language models have demonstrated remarkable capabilities in natural language understanding.
+    GPU optimization remains critical for efficient model inference at scale.
+    The alignment of tensor dimensions affects performance on modern accelerators.
+    """
+
+    enc = tokenizer(test_text, return_tensors="pt", truncation=True, max_length=max_tokens)
+    input_ids = enc.input_ids.to(device)
+
+    with torch.inference_mode():
+        outputs = model(input_ids, labels=input_ids)
+        loss = outputs.loss.item()
+        ppl = torch.exp(torch.tensor(loss)).item()
+
+    return {
+        "perplexity": ppl,
+        "loss": loss,
+        "tokens": input_ids.shape[1],
+    }
+
+
+def run_variant(variant_name: str, model, tokenizer, config: BenchmarkConfig,
+                repair_info: Optional[Dict] = None) -> VariantResult:
+    """Run full benchmark suite for a single variant."""
+    print(f"\n{'='*60}")
+    print(f"Benchmarking: {variant_name}")
+    print(f"{'='*60}")
+
+    # Count parameters
+    num_params = sum(p.numel() for p in model.parameters())
+
+    # Reset memory tracking
+    torch.cuda.reset_peak_memory_stats()
+
+    # Run prefill benchmark
+    print("\nPrefill Benchmark:")
+    prefill_results = benchmark_prefill(model, tokenizer, config)
+
+    # Run decode benchmark
+    print("\nDecode Benchmark:")
+    decode_results = benchmark_decode(model, tokenizer, config)
+
+    # Get peak memory
+    peak_memory = torch.cuda.max_memory_allocated() / 1024 / 1024  # MB
+
+    return VariantResult(
+        variant=variant_name,
+        prefill_results=prefill_results,
+        decode_results=decode_results,
+        memory_peak_mb=peak_memory,
+        model_params=num_params,
+        repair_info=repair_info,
+    )
+
+
+def compute_comparison(results: Dict[str, VariantResult]) -> Dict:
+    """Compute comparison metrics between variants."""
+    comparison = {}
+
+    # Get baseline metrics if available
+    baseline = results.get("baseline")
+    palu = results.get("palu")
+    palu_repair = results.get("palu_repair")
+
+    if not baseline or not palu:
+        return {"error": "Missing baseline or palu results"}
+
+    # Compare prefill throughput
+    def get_avg_throughput(result: VariantResult, metric_type: str) -> float:
+        if metric_type == "prefill":
+            data = result.prefill_results
+        else:
+            data = result.decode_results
+
+        valid = [r for r in data if "error" not in r and "throughput_toks_per_s" in r]
+        if not valid:
+            return 0.0
+        return sum(r["throughput_toks_per_s"]["mean"] for r in valid) / len(valid)
+
+    baseline_prefill = get_avg_throughput(baseline, "prefill")
+    palu_prefill = get_avg_throughput(palu, "prefill")
+
+    comparison["prefill"] = {
+        "baseline_tok_s": baseline_prefill,
+        "palu_tok_s": palu_prefill,
+        "palu_vs_baseline_pct": 100.0 * (palu_prefill - baseline_prefill) / baseline_prefill if baseline_prefill > 0 else 0,
+    }
+
+    if palu_repair:
+        repair_prefill = get_avg_throughput(palu_repair, "prefill")
+        comparison["prefill"]["palu_repair_tok_s"] = repair_prefill
+        comparison["prefill"]["repair_vs_palu_pct"] = 100.0 * (repair_prefill - palu_prefill) / palu_prefill if palu_prefill > 0 else 0
+        comparison["prefill"]["repair_vs_baseline_pct"] = 100.0 * (repair_prefill - baseline_prefill) / baseline_prefill if baseline_prefill > 0 else 0
+
+    # Compare decode throughput
+    baseline_decode = get_avg_throughput(baseline, "decode")
+    palu_decode = get_avg_throughput(palu, "decode")
+
+    comparison["decode"] = {
+        "baseline_tok_s": baseline_decode,
+        "palu_tok_s": palu_decode,
+        "palu_vs_baseline_pct": 100.0 * (palu_decode - baseline_decode) / baseline_decode if baseline_decode > 0 else 0,
+    }
+
+    if palu_repair:
+        repair_decode = get_avg_throughput(palu_repair, "decode")
+        comparison["decode"]["palu_repair_tok_s"] = repair_decode
+        comparison["decode"]["repair_vs_palu_pct"] = 100.0 * (repair_decode - palu_decode) / palu_decode if palu_decode > 0 else 0
+        comparison["decode"]["repair_vs_baseline_pct"] = 100.0 * (repair_decode - baseline_decode) / baseline_decode if baseline_decode > 0 else 0
+
+    # Memory comparison
+    comparison["memory"] = {
+        "baseline_mb": baseline.memory_peak_mb,
+        "palu_mb": palu.memory_peak_mb,
+        "palu_compression_pct": 100.0 * (baseline.memory_peak_mb - palu.memory_peak_mb) / baseline.memory_peak_mb if baseline.memory_peak_mb > 0 else 0,
+    }
+
+    if palu_repair:
+        comparison["memory"]["palu_repair_mb"] = palu_repair.memory_peak_mb
+        comparison["memory"]["repair_overhead_pct"] = 100.0 * (palu_repair.memory_peak_mb - palu.memory_peak_mb) / palu.memory_peak_mb if palu.memory_peak_mb > 0 else 0
+
+    return comparison
+
+
+def generate_summary_report(results: Dict[str, VariantResult], comparison: Dict, config: BenchmarkConfig) -> str:
+    """Generate markdown summary report."""
+    lines = [
+        "# C5 End-to-End LLM Inference Comparison",
+        "",
+        f"Generated: {datetime.now().isoformat()}",
+        "",
+        "## Configuration",
+        f"- Prefill batches: {config.prefill_batches}",
+        f"- Prefill seq_lens: {config.prefill_seq_lens}",
+        f"- Decode batches: {config.decode_batches}",
+        f"- Decode context lens: {config.decode_ctx_lens}",
+        f"- Decode gen lens: {config.decode_gen_lens}",
+        f"- Warmup: {config.warmup}, Measure: {config.measure}, Trials: {config.trials}",
+        f"- Repair strategy: {config.repair_strategy}",
+        "",
+        "## Results Summary",
+        "",
+    ]
+
+    # Prefill comparison
+    if "prefill" in comparison:
+        p = comparison["prefill"]
+        lines.extend([
+            "### Prefill Throughput (tok/s)",
+            "",
+            "| Variant | Throughput | vs Baseline |",
+            "|---------|------------|-------------|",
+            f"| Baseline | {p['baseline_tok_s']:.1f} | - |",
+            f"| PaLU | {p['palu_tok_s']:.1f} | {p['palu_vs_baseline_pct']:+.1f}% |",
+        ])
+        if "palu_repair_tok_s" in p:
+            lines.append(f"| PaLU+Repair | {p['palu_repair_tok_s']:.1f} | {p['repair_vs_baseline_pct']:+.1f}% |")
+        lines.append("")
+
+    # Decode comparison
+    if "decode" in comparison:
+        d = comparison["decode"]
+        lines.extend([
+            "### Decode Throughput (tok/s)",
+            "",
+            "| Variant | Throughput | vs Baseline |",
+            "|---------|------------|-------------|",
+            f"| Baseline | {d['baseline_tok_s']:.1f} | - |",
+            f"| PaLU | {d['palu_tok_s']:.1f} | {d['palu_vs_baseline_pct']:+.1f}% |",
+        ])
+        if "palu_repair_tok_s" in d:
+            lines.append(f"| PaLU+Repair | {d['palu_repair_tok_s']:.1f} | {d['repair_vs_baseline_pct']:+.1f}% |")
+        lines.append("")
+
+    # Memory comparison
+    if "memory" in comparison:
+        m = comparison["memory"]
+        lines.extend([
+            "### Peak Memory Usage (MB)",
+            "",
+            "| Variant | Memory | vs Baseline |",
+            "|---------|--------|-------------|",
+            f"| Baseline | {m['baseline_mb']:.1f} | - |",
+            f"| PaLU | {m['palu_mb']:.1f} | {m['palu_compression_pct']:+.1f}% |",
+        ])
+        if "palu_repair_mb" in m:
+            lines.append(f"| PaLU+Repair | {m['palu_repair_mb']:.1f} | {m['repair_overhead_pct']:+.1f}% overhead |")
+        lines.append("")
+
+    # Repair info
+    palu_repair = results.get("palu_repair")
+    if palu_repair and palu_repair.repair_info:
+        ri = palu_repair.repair_info
+        lines.extend([
+            "## Dimension Repair Analysis",
+            "",
+            f"- Strategy: {ri['strategy']}",
+            f"- Memory overhead: {ri['memory_overhead_pct']:.2f}%",
+            f"- Affected layers: {ri['affected_layers']}",
+            "",
+            "### Before Repair",
+            f"- Misaligned dimensions: {ri['before']['misaligned_pct']:.1f}%",
+            f"- Unique dims: {ri['before']['unique_dims']}",
+            "",
+            "### After Repair",
+            f"- Misaligned dimensions: {ri['after']['misaligned_pct']:.1f}%",
+            f"- Unique dims: {ri['after']['unique_dims']}",
+            "",
+        ])
+
+    # Key findings
+    lines.extend([
+        "## Key Findings",
+        "",
+    ])
+
+    if "prefill" in comparison and "repair_vs_palu_pct" in comparison["prefill"]:
+        speedup = comparison["prefill"]["repair_vs_palu_pct"]
+        if speedup > 0:
+            lines.append(f"- Dimension repair improves prefill throughput by **{speedup:.1f}%** over unrepaired PaLU")
+
+    if "decode" in comparison and "repair_vs_palu_pct" in comparison["decode"]:
+        speedup = comparison["decode"]["repair_vs_palu_pct"]
+        if speedup > 0:
+            lines.append(f"- Dimension repair improves decode throughput by **{speedup:.1f}%** over unrepaired PaLU")
+
+    if palu_repair and palu_repair.repair_info:
+        overhead = palu_repair.repair_info["memory_overhead_pct"]
+        lines.append(f"- Memory overhead from repair: **{overhead:.2f}%**")
+
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="C5 End-to-End LLM Inference Comparison")
+    parser.add_argument("--out", type=Path, required=True, help="Output directory")
+    parser.add_argument("--device", default="cuda:0", help="Device to run on")
+    parser.add_argument("--dtype", default="float16", choices=["float16", "bfloat16"])
+    parser.add_argument("--repair-strategy", default="minimal",
+                       choices=["minimal", "optimal", "predefined", "tradeoff"])
+    parser.add_argument("--smoke", action="store_true", help="Run smoke test with reduced params")
+    parser.add_argument("--skip-baseline", action="store_true", help="Skip baseline (for faster iteration)")
+    parser.add_argument("--run-id", default=None, help="Custom run ID")
+    args = parser.parse_args()
+
+    # Generate run ID
+    run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S") + "_C5_e2e_comparison"
+    run_dir = args.out / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"C5 End-to-End LLM Inference Comparison")
+    print(f"Output: {run_dir}")
+    print(f"Device: {args.device}")
+    print(f"Dtype: {args.dtype}")
+    print(f"Repair strategy: {args.repair_strategy}")
+
+    # Configure benchmark
+    if args.smoke:
+        print("\n[SMOKE TEST MODE - reduced parameters]")
+        config = BenchmarkConfig(
+            prefill_batches=[1],
+            prefill_seq_lens=[256, 512],
+            decode_batches=[1],
+            decode_ctx_lens=[256],
+            decode_gen_lens=[32],
+            warmup=3,
+            measure=10,
+            trials=2,
+            dtype=args.dtype,
+            device=args.device,
+            repair_strategy=args.repair_strategy,
+        )
+    else:
+        config = BenchmarkConfig(
+            prefill_batches=[1, 4],
+            prefill_seq_lens=[256, 512, 1024, 2048],
+            decode_batches=[1, 4],
+            decode_ctx_lens=[512, 1024],
+            decode_gen_lens=[64, 128],
+            warmup=10,
+            measure=30,
+            trials=3,
+            dtype=args.dtype,
+            device=args.device,
+            repair_strategy=args.repair_strategy,
+        )
+
+    torch_dtype = torch.float16 if args.dtype == "float16" else torch.bfloat16
+    results = {}
+
+    # 1. Baseline benchmark
+    if not args.skip_baseline:
+        print("\n" + "="*60)
+        print("Loading Baseline Model (Llama-3-8B-Instruct)")
+        print("="*60)
+        baseline_model, baseline_tokenizer = load_baseline_model(args.device, torch_dtype)
+        results["baseline"] = run_variant("baseline", baseline_model, baseline_tokenizer, config)
+
+        # Free memory
+        del baseline_model
+        torch.cuda.empty_cache()
+
+    # 2. PaLU benchmark
+    print("\n" + "="*60)
+    print("Loading PaLU Model")
+    print("="*60)
+    palu_model, palu_tokenizer, palu_dir = load_palu_model_variant(args.device, torch_dtype)
+
+    # Analyze PaLU dimensions
+    palu_dim_analysis = analyze_palu_dimensions(palu_model)
+    print(f"PaLU dimension analysis:")
+    print(f"  Unique dims: {palu_dim_analysis['unique_dims']}")
+    print(f"  Misaligned: {palu_dim_analysis['misaligned_pct']:.1f}%")
+
+    results["palu"] = run_variant("palu", palu_model, palu_tokenizer, config)
+    results["palu"].repair_info = {"before_repair": palu_dim_analysis}
+
+    # 3. PaLU + Repair benchmark
+    print("\n" + "="*60)
+    print(f"Applying Dimension Repair (strategy={args.repair_strategy})")
+    print("="*60)
+
+    repaired_model, repair_info = apply_dimension_repair(palu_model, strategy=args.repair_strategy)
+    print(f"Repair applied:")
+    print(f"  Memory overhead: {repair_info['memory_overhead_pct']:.2f}%")
+    print(f"  Affected layers: {repair_info['affected_layers']}")
+    print(f"  After repair - Misaligned: {repair_info['after']['misaligned_pct']:.1f}%")
+
+    results["palu_repair"] = run_variant("palu_repair", repaired_model, palu_tokenizer, config, repair_info)
+
+    # Compute comparison
+    comparison = compute_comparison(results)
+
+    # Generate report
+    report = generate_summary_report(results, comparison, config)
+    print("\n" + report)
+
+    # Save results
+    output_data = {
+        "config": asdict(config),
+        "results": {k: asdict(v) for k, v in results.items()},
+        "comparison": comparison,
+        "environment": collect_environment(),
+        "palu_dir": str(palu_dir),
+    }
+
+    (run_dir / "config.json").write_text(json.dumps(asdict(config), indent=2))
+    (run_dir / "results.json").write_text(json.dumps(output_data, indent=2))
+    (run_dir / "comparison.json").write_text(json.dumps(comparison, indent=2))
+    (run_dir / "report.md").write_text(report)
+    (run_dir / "env.json").write_text(json.dumps(collect_environment(), indent=2))
+
+    print(f"\nResults saved to: {run_dir}")
+    print("Files: config.json, results.json, comparison.json, report.md, env.json")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,38 @@
+Task: 根据最新发现更新 report.md 和 Latex
+
+Output:
+更新完成。让我总结一下本次更新的内容：
+
+---
+
+## 更新内容
+
+### report.md 更新
+- **1.3 节**：标题从"后端回退放大性能差距"改为"后端可用性与内部性能差异"，添加 C21 实验的重要修正
+- **2.1 节**：添加详细延迟数据表（D=112-121），包含 PaLU 影响分析
+- **5. 结论**：修正根因分析，删除错误的"PyTorch 后端回退"假设，添加正确的 FlashAttention 内部慢速路径分析
+
+### Latex/main.tex 更新
+- **摘要/Introduction**：修正 FlashAttention 回退描述，改为"FlashAttention internal slow path with 30-45% overhead"
+- **4.1 节 (PyTorch Backend Selection)**：重写为"假设被推翻"结构，添加 C21 实验结果表格（Table backend_avail）
+- **4.2 节 (CUDA Kernel Layer)**：添加新假设（向量化加载、GEMM tile selection、predication overhead、内部 padding）
+- **Conclusion**：更新根因描述
+
+### 图表状态
+- 现有图表 `Latex/figures/sdpa_latency.png` 已经展示 staircase effect，无需更新
+- C21 实验目前没有图表，关键发现通过表格和文字说明
+
+## 待补充
+- **C22 实验**：NCU profiling 验证 FlashAttention 内部执行路径差异
+- **端到端验证**：Baseline vs PaLU vs PaLU+Repair 的完整 LLM 推理对比
+- **Perplexity 验证**：确认 padding 不影响模型精度
+
+## 关键数据修正
+
+| 原描述 | 修正后 |
+|--------|--------|
+| FlashAttention 回退到 Math backend | FlashAttention 始终可用，内部有 30-45% 慢速路径 |
+| head_dim=107 导致后端回退 | FlashAttention 100% 可用于 104-128 所有维度 |
+| MEM_EFFICIENT 是备选 | MEM_EFFICIENT 仅对 8-aligned 维度可用 (0/42 非对齐) |
+
+

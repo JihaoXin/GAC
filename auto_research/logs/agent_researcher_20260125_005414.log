@@ -1,0 +1,108 @@
+Task: 分析端到端验证结果
+
+Output:
+---
+
+## 当前状态
+
+**阶段**: C5_validation - 端到端 LLM 推理验证
+**状态**: ⚠️ BLOCKED - 需要修复方法论问题
+
+---
+
+## 数据分析
+
+### C5 实验结果（Job 18425）
+
+C5 实验成功运行完毕，但结果分析揭示了 **关键方法论问题**：
+
+| 指标 | 观测值 | 预期值 | 差异 |
+|------|--------|--------|------|
+| PaLU unique_dims | [320, 384, ...1024] | [114, 116, ...125] | GROUP vs per-HEAD |
+| misaligned_pct | 0.0% | 96.9% | 错误识别 |
+| total_heads | 192 | 512 | 遗漏 per-head |
+| repair affected_layers | 0 | 全部 | repair 未生效 |
+
+### 根因分析
+
+`analyze_palu_dimensions()` 函数检测的是 `k_proj.out_features`，但 PaLU 模型结构是：
+
+```
+k_proj (PaLU SVD 分解)
+├── VT: Linear(hidden, compressed_group_dim)  # 320, 448, ... - GROUP 级别, 已对齐
+├── U.0: Linear(compressed_dim_per_head, hidden)  # 114-125 - per-HEAD, 不对齐!
+├── U.1: Linear(...)
+└── ...
+```
+
+**问题**：代码检测的是 GROUP 级别的维度（已自然对齐到 64 的倍数），而真正需要修复的是 **per-HEAD 级别** 的压缩维度（114-125，大部分不是 8 的倍数）。
+
+### 有效数据
+
+| 变体 | Prefill (tok/s) | Decode (tok/s) | Memory (MB) |
+|------|-----------------|----------------|-------------|
+| Baseline | 9870 | 119 | 19003 |
+| PaLU | 9672 (-2.0%) | 1371 (+**11.5x**) | 18896 |
+| PaLU+Repair | 9524 (-3.5%) | 1374 (+0.2%) | 34233 (异常) |
+
+---
+
+## 关键发现
+
+- **F5.1**: C5 维度分析代码与 PaLU 模型结构不匹配
+  - **证据**: `unique_dims: [320-1024]` 而非预期的 `[114-125]`
+  - **影响**: dimension repair 未实际生效 (affected_layers: 0)
+
+- **F5.2**: PaLU 压缩在 decode 阶段实现 **11.5x 吞吐量提升**
+  - **证据**: baseline 119 tok/s → PaLU 1371 tok/s
+  - **原因**: KV cache 压缩减少内存访问，decode 是 memory-bound
+
+- **F5.3**: 内存测量异常 (repair 后 81% overhead)
+  - **证据**: palu_repair_mb: 34233 vs palu_mb: 18896
+  - **原因**: 可能两个模型同时在 GPU 上
+
+---
+
+## 假设验证
+
+| 假设 | 状态 | 说明 |
+|------|------|------|
+| C5 验证 dimension repair 端到端有效性 | ❌ 无法验证 | repair 未生效 |
+| PaLU 压缩能加速 decode | ✓ 部分验证 | 11.5x speedup |
+| dimension repair 内存开销 <5% | ❌ 无法验证 | 测量方法有问题 |
+
+---
+
+## 下一步建议
+
+### 立即修复（高优先级）
+
+1. **修复 `analyze_palu_dimensions()` 函数**
+   - 深入 PaLU 模型结构，识别 `U.i` 层的 `out_features`
+   - 参考 `results/palu_dim_dist/llama3_r0.8/dims.json` 中的 `dims_per_head_all_kv` 数据
+
+2. **修复 `DimensionRepairer` 对 PaLU 的适配**
+   - 识别 PaLU 的 SVD 分解层 (VT, U)
+   - 对 U 矩阵的输出维度进行 padding
+
+3. **修复内存测量逻辑**
+   - repair 后释放原模型，避免同时占用显存
+
+4. **重新运行 C5 实验**
+
+### 理由
+
+C4 实验已在 **kernel 级别** 验证了 dimension repair 的有效性（25-28% speedup），
+但 C5 端到端验证因为代码 bug 未能完成。修复后重跑是完成论文验证的必要步骤。
+
+---
+
+## 文件更新
+
+| 文件 | 更新内容 |
+|------|----------|
+| `auto_research/state/findings.yaml` | 添加 C5_validation 发现 (F5.1-F5.4) |
+| `auto_research/state/research_state.yaml` | 更新 C5 状态为 blocked，记录问题详情 |
+| `report.md` | 添加 C5 实验分析和发现的问题 |
+
+

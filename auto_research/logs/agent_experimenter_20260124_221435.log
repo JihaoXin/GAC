@@ -1,0 +1,60 @@
+Task: 实现 dimension repair 算法并验证
+
+Output:
+现在输出实验设计总结。
+
+## 实验设计总结
+
+### 目的
+验证 dimension repair 算法能否通过 padding 恢复 PaLU 压缩后的非对齐维度的性能。
+
+### 实现内容
+
+**1. 核心模块** (`src/gcompress_bench/dimension_repair.py`)
+
+- **ShapeContract**: 形式化对齐约束
+  - `minimal_alignment = 8` (float4 向量化加载)
+  - `optimal_alignment = 16` (Tensor Core tiles)
+  - `recommended_values = {32, 64, 96, 112, 128, ...}`
+
+- **repair_dimension()**: 4 种修复策略
+  - MINIMAL: 对齐到 8，最小内存开销
+  - OPTIMAL: 对齐到 16，最优 Tensor Core
+  - PREDEFINED: 对齐到预定义快速路径
+  - TRADEOFF: 根据开销阈值自动选择
+
+- **DimensionRepairer**: 模型级别修复器
+  - `analyze_model()`: 识别需要修复的维度
+  - `compute_repair_plan()`: 计算修复方案
+  - `repair_model()`: 应用修复
+
+**2. 验证脚本** (`scripts/run_c4_dimension_repair.py`)
+
+**3. Slurm 作业** (`slurm/run_c4_dimension_repair.sbatch`)
+
+### 提交结果
+
+- **Job ID**: 18424
+- **状态**: ✓ 已完成
+- **结果路径**: `results/C4/20260124_221749_C4_dimension_repair/`
+
+### 验证结果
+
+| 指标 | 结果 |
+|------|------|
+| 测试通过 | 30/30 (100%) |
+| 内存开销 (minimal) | 3.72% |
+| 内存开销 (optimal) | 7.20% |
+| 性能加速 (非对齐维度) | 24-28% |
+
+### 下一步
+
+1. **C5 验证阶段**:
+   - 端到端 LLM 推理：Baseline vs PaLU vs PaLU+Repair
+   - Perplexity 验证：确认 padding 不影响精度
+   - 性能-内存 Pareto 分析
+
+2. **论文撰写**:
+   - 更新 Latex/main.tex
+
+

@@ -442,6 +442,131 @@ def run_p1_padding_rescue(exp_spec: Dict, device: str = "cuda:0", seed: int = 42
     return results
 
 
+def run_c21_backend_selection(exp_spec: Dict, device: str = "cuda:0", seed: int = 42) -> Dict:
+    """C2.1: Verify PyTorch SDPA backend selection boundaries.
+
+    This experiment verifies:
+    1. Which backend is selected for each head_dim (AUTO mode)
+    2. Backend availability for each head_dim
+    3. Performance comparison across backends
+    4. Focus on PaLU-typical dimensions (114-125 range)
+    """
+    set_deterministic(seed)
+    dtype_str = exp_spec["dtype"]
+    dtype = get_dtype(dtype_str)
+    shapes = exp_spec["shapes"]
+    head_dims = exp_spec["head_dims"]
+    backends = exp_spec["backends"]
+    warmup = exp_spec.get("warmup", 50)
+    measure = exp_spec.get("measure", 200)
+    trials = exp_spec.get("trials", 3)
+
+    results = {
+        "experiment": "C21_backend_selection",
+        "config": exp_spec,
+        "measurements": [],
+        "backend_summary": {},  # Quick lookup: head_dim -> selected_backend
+    }
+
+    for shape in shapes:
+        batch = shape["batch"]
+        seq_len = shape["seq_len"]
+        n_heads = shape["n_heads"]
+
+        for head_dim in head_dims:
+            torch.manual_seed(seed)
+            query = torch.randn(batch, n_heads, seq_len, head_dim, dtype=dtype, device=device)
+            key = torch.randn(batch, n_heads, seq_len, head_dim, dtype=dtype, device=device)
+            value = torch.randn(batch, n_heads, seq_len, head_dim, dtype=dtype, device=device)
+
+            backend_results = {}
+            auto_timing = None
+
+            for backend in backends:
+                def make_kernel_fn(b):
+                    def kernel_fn():
+                        if b == "AUTO":
+                            return torch.nn.functional.scaled_dot_product_attention(
+                                query, key, value, is_causal=False
+                            )
+                        elif b == "FLASH":
+                            with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):
+                                return torch.nn.functional.scaled_dot_product_attention(
+                                    query, key, value, is_causal=False
+                                )
+                        elif b == "MEM_EFFICIENT":
+                            with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
+                                return torch.nn.functional.scaled_dot_product_attention(
+                                    query, key, value, is_causal=False
+                                )
+                        elif b == "MATH":
+                            with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+                                return torch.nn.functional.scaled_dot_product_attention(
+                                    query, key, value, is_causal=False
+                                )
+                    return kernel_fn
+
+                kernel_fn = make_kernel_fn(backend)
+
+                try:
+                    trial_results = run_multiple_trials(kernel_fn, warmup, measure, trials, device)
+                    backend_results[backend] = {
+                        "available": True,
+                        "timing": trial_results["timing"],
+                    }
+                    if backend == "AUTO":
+                        auto_timing = trial_results["timing"]["mean"]
+                except Exception as e:
+                    backend_results[backend] = {
+                        "available": False,
+                        "error": str(e),
+                    }
+
+            # Detect which backend AUTO is using by comparing timings
+            detected_backend = "UNKNOWN"
+            if auto_timing is not None:
+                min_diff = float('inf')
+                for b in ["FLASH", "MEM_EFFICIENT", "MATH"]:
+                    if b in backend_results and backend_results[b].get("available", False):
+                        diff = abs(backend_results[b]["timing"]["mean"] - auto_timing)
+                        # Use relative difference
+                        rel_diff = diff / auto_timing if auto_timing > 0 else float('inf')
+                        if rel_diff < min_diff and rel_diff < 0.05:  # Within 5%
+                            min_diff = rel_diff
+                            detected_backend = b
+
+            # Record alignment properties
+            is_8_aligned = head_dim % 8 == 0
+            is_16_aligned = head_dim % 16 == 0
+
+            measurement = {
+                "shape": {"batch": batch, "seq_len": seq_len, "n_heads": n_heads, "head_dim": head_dim},
+                "dtype": dtype_str,
+                "alignment": {
+                    "mod_8": is_8_aligned,
+                    "mod_16": is_16_aligned,
+                },
+                "detected_backend": detected_backend,
+                "backend_results": backend_results,
+            }
+            results["measurements"].append(measurement)
+
+            # Update summary
+            key_str = f"{batch}x{seq_len}x{n_heads}x{head_dim}"
+            results["backend_summary"][key_str] = {
+                "head_dim": head_dim,
+                "detected_backend": detected_backend,
+                "is_8_aligned": is_8_aligned,
+                "flash_available": backend_results.get("FLASH", {}).get("available", False),
+                "mem_efficient_available": backend_results.get("MEM_EFFICIENT", {}).get("available", False),
+            }
+
+            del query, key, value
+            torch.cuda.empty_cache()
+
+    return results
+
+
 def run_het1_hetero_batching(exp_spec: Dict, device: str = "cuda:0", seed: int = 42) -> Dict:
     """HET1: Heterogeneous head batching penalty."""
     set_deterministic(seed)
@@ -547,6 +672,7 @@ def run_het1_hetero_batching(exp_spec: Dict, device: str = "cuda:0", seed: int =
 EXPERIMENT_RUNNERS = {
     "sdpa_dense": run_s1_sdpa_dense_sweep,
     "sdpa_backend_forced": run_s2_sdpa_backend_forced,
+    "sdpa_backend_selection": run_c21_backend_selection,
     "gemm_k_dense": run_g3_gemm_k_dense,
     "gemm_n_dense": run_g4_gemm_n_dense,
     "padding_rescue": run_p1_padding_rescue,
