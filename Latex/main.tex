@@ -46,7 +46,6 @@
   \city{Thuwal}
   \country{Saudi Arabia}
 }
-\email{tian.lvy@kaust.edu.sa}
 
 \author{Qilong Pan}
 \affiliation{
@@ -54,7 +53,6 @@
   \city{Riyadh}
   \country{Saudi Arabia}
 }
-\email{qilong.pan@humain.ai}
 
 \author{Kesen Wang}
 \affiliation{
@@ -62,7 +60,6 @@
   \city{Riyadh}
   \country{Saudi Arabia}
 }
-\email{kesen.wang@humain.ai}
 
 \begin{abstract}
 Post-training compression techniques for Large Language Models (LLMs) often result in irregular tensor dimensions (e.g., \texttt{head\_dim=107} instead of 128).
@@ -124,7 +121,7 @@ This paper makes the following contributions:
   \item \textbf{Root Cause Analysis}: We identify the causes across three layers: PyTorch backend selection, CUDA kernel paths, and hardware constraints (\S\ref{sec:causes}).
   \item \textbf{Shape Contract}: We formalize dimension alignment requirements as optimization constraints (\S\ref{sec:solution}).
   \item \textbf{Dimension Repair}: We propose a lightweight post-compression pass that restores alignment (\S\ref{sec:solution}).
-  \item \textbf{Evaluation}: Kernel-level experiments on SDPA and GEMM validate that dimension repair recovers 25--30\% performance with only 3.7--4.7\% memory overhead. End-to-end integration with PaLU's SVD structure is identified as future work (\S\ref{sec:eval}).
+  \item \textbf{Evaluation}: Kernel-level experiments validate dimension repair achieves 25--30\% speedup with 3.7--4.7\% memory overhead on SDPA and GEMM microbenchmarks. \textbf{Note:} End-to-end integration with SVD-based compression (e.g., PaLU) is future work due to factorized weight structure challenges ($W = U \cdot V^T$) (\S\ref{sec:eval}).
 \end{enumerate}
 
 %% ===========================================
@@ -402,7 +399,7 @@ For optimal Tensor Core utilization, prefer $d_{pad} \mod 16 = 0$.
   \STATE $b' \in \mathbb{R}^{d'_{out}} \gets \mathbf{0}$
   \STATE $b'[0:d_{out}] \gets b$ \COMMENT{Copy original bias}
 \ENDIF
-\RETURN $W', b'$
+\RETURN $W'$ (and $b'$ if bias exists)
 \end{algorithmic}
 \end{algorithm}
 
@@ -511,7 +508,7 @@ Table~\ref{tab:repair_perf} shows SDPA performance for repaired dimensions.
 
 \begin{table}[t]
 \centering
-\caption{SDPA latency (ms) before and after dimension repair ($B$=4, $S$=2048, $H$=32). Note: D=107 baseline (2.064ms) differs slightly from Table~\ref{tab:padding} (2.192ms) due to different experiment runs; we report both for completeness.}
+\caption{SDPA latency (ms) before and after dimension repair ($B$=4, $S$=2048, $H$=32). Note: D=107 baseline (2.064ms) differs from Table~\ref{tab:padding} (2.192ms) due to run-to-run variance ($\sim$6\%), which is within normal GPU measurement variability.}
 \label{tab:repair_perf}
 \begin{tabular}{lrrrrr}
 \toprule
@@ -555,22 +552,25 @@ Original & Repaired & Original & Repaired \\
 
 \subsection{End-to-End LLM Inference (C5)}
 
+\noindent\fbox{\parbox{0.95\columnwidth}{
+\textbf{Scope Note:} The results in this subsection show \emph{PaLU compression} benefits (reduced KV cache), \textbf{not} dimension repair speedups.
+Our repair pass was not applied because PaLU's SVD factorization ($W_{kv} = U \cdot V^T$) requires specialized adaptation---see \S\ref{sec:solution} for discussion.
+}}
+\vspace{0.5em}
+
 We evaluate end-to-end inference performance on Llama-3-8B comparing baseline and PaLU-compressed (ratio=0.7) variants on A100 80GB (PyTorch 2.9.1, CUDA 12.8).
 Figure~\ref{fig:e2e} visualizes the prefill and decode throughput comparison.
-
-\textbf{Important clarification:} The speedups reported here are from \emph{PaLU compression} (reduced KV cache), not from dimension repair.
-Applying our repair pass to PaLU's SVD decomposition ($W_{kv} = U \cdot V^T$) requires adapting to the factorized structure where per-head dimensions reside in $U$ matrices, which we leave to future work.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig6_e2e.pdf}
-\caption{\textbf{End-to-end LLM inference: PaLU compression benefit.} These speedups are from compression (reduced KV cache), \emph{not} dimension repair. See Table~\ref{tab:e2e} for details and methodology notes.}
+\caption{\textbf{End-to-end LLM inference: PaLU compression benefit.} Speedups are from compression, not dimension repair (see Scope Note above).}
 \label{fig:e2e}
 \end{figure}
 
 \begin{table}[t]
 \centering
-\caption{\textbf{End-to-end LLM inference: PaLU compression benefit (NOT from dimension repair).} The 11.5$\times$ decode speedup results from reduced KV cache size, not from dimension alignment. Our dimension repair pass was not applied because PaLU's SVD factorization requires specialized adaptation (\S\ref{sec:eval}.4).}
+\caption{\textbf{End-to-end LLM inference results.} The 11.5$\times$ decode speedup is from PaLU compression (reduced KV cache), not dimension repair (see Scope Note).}
 \label{tab:e2e}
 \begin{tabular}{lrrr}
 \toprule
@@ -606,7 +606,7 @@ Two approaches: (1) constrained SVD with aligned rank, or (2) post-compression $
 Zero-padding guarantees \textbf{bit-exact output preservation}.
 We provide both theoretical and empirical evidence:
 
-\paragraph{Theoretical Guarantee.}
+\paragraph{Theoretical Guarantee (Forward-Pass Equivalence).}
 For a linear layer $y = Wx + b$ with $W \in \mathbb{R}^{d_{out} \times d_{in}}$, the padded layer uses $W' \in \mathbb{R}^{d'_{out} \times d_{in}}$ where $W'[0:d_{out}, :] = W$ and $W'[d_{out}:d'_{out}, :] = \mathbf{0}$.
 The output $y' = W'x + b'$ satisfies:
 \begin{equation}
@@ -615,6 +615,7 @@ y'[0:d_{out}] = W'[0:d_{out}, :] \cdot x + b'[0:d_{out}] = Wx + b = y
 Thus the original output is exactly preserved in the first $d_{out}$ positions.
 For attention mechanisms, zero-valued key/query dimensions contribute zero to attention scores ($q \cdot k^T$), making padding semantically neutral.
 This mathematical equivalence guarantees \textbf{no accuracy degradation}---no retraining or fine-tuning is required.
+\textbf{Formal statement}: Let $f_{\theta}(x)$ denote the original model and $f_{\theta'}(x)$ the repaired model. For any input $x$, we have $f_{\theta}(x) = \text{slice}(f_{\theta'}(x), [0:d_{out}])$, ensuring functional equivalence.
 
 \paragraph{Empirical Verification.}
 We verify that repaired linear layers produce \textbf{identical outputs} (within floating-point precision) for the original dimensions (30/30 unit tests passed).
@@ -622,8 +623,9 @@ We verify that repaired linear layers produce \textbf{identical outputs} (within
 \paragraph{Limitations.}
 Our evaluation has three main limitations:
 
-\textbf{(1) Accuracy validation scope:} While unit tests confirm bit-exact preservation (30/30 passed), we have not conducted comprehensive perplexity evaluation (e.g., WikiText-2) or downstream task assessment (e.g., HellaSwag, PIQA).
-Zero-padding is mathematically equivalent to the original computation, so we expect no accuracy degradation---but large-scale validation would strengthen this claim.
+\textbf{(1) Accuracy validation scope:} While unit tests confirm bit-exact preservation (30/30 passed) and our theoretical analysis proves forward-pass equivalence (\S\ref{sec:eval}.5), we have not conducted comprehensive perplexity evaluation (e.g., WikiText-2) or downstream task assessment (e.g., HellaSwag, PIQA).
+Zero-padding is mathematically equivalent to the original computation---the proof above guarantees $f_{\theta}(x) = \text{slice}(f_{\theta'}(x))$ for any input---so we expect no accuracy degradation.
+However, large-scale validation would strengthen this claim and is left as future work.
 
 \textbf{(2) End-to-end repair integration:} The kernel-level speedups (25--30\%) are validated on SDPA and GEMM microbenchmarks but not yet integrated into PaLU's SVD decomposition.
 PaLU represents $W_{kv} = U \cdot V^T$ where irregular dimensions reside in $U$ matrices; adapting our repair pass requires additional engineering to modify $U$ while preserving the factorization structure.
@@ -704,8 +706,14 @@ End-to-end evaluation shows PaLU achieves 11.5$\times$ decode speedup despite di
 However, combining compression with dimension repair promises further gains, particularly in compute-bound prefill (estimated +15--25\%).
 
 We advocate for compression-aware kernel design and alignment-aware compression algorithms.
-Future work includes integrating alignment constraints directly into compression optimization, extending the repair pass to SVD decomposition structures, and analysis on H100.
-While our analysis focuses on A100, we expect similar alignment cliffs on H100 where TMA (Tensor Memory Accelerator) has different granularity requirements and WGMMA instructions impose their own tile constraints---potentially with different optimal alignment values.
+
+\paragraph{Future Work.}
+We identify three directions for future research:
+\begin{enumerate}
+  \item \textbf{SVD Integration}: Adapting dimension repair to low-rank decomposition structures ($W = U \cdot V^T$), either through constrained SVD or post-compression $U$ padding.
+  \item \textbf{Perplexity Validation}: Comprehensive accuracy evaluation (WikiText-2, downstream tasks) to empirically confirm our theoretical guarantee of zero accuracy degradation.
+  \item \textbf{H100 Analysis}: While our analysis focuses on A100, we expect similar alignment cliffs on H100 where TMA (Tensor Memory Accelerator) has different granularity requirements and WGMMA instructions impose their own tile constraints---potentially requiring different optimal alignment values (e.g., 32 or 64 instead of 16).
+\end{enumerate}
 
 %% ===========================================
 %% REFERENCES

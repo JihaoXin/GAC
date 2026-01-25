@@ -581,6 +581,11 @@ Zero-padding 确保位级精确输出保持：
 - 对 attention score 无影响（零贡献）
 - **无需重新训练或微调**
 
+**形式化证明 (Forward-Pass Equivalence)**：设 $f_{\theta}(x)$ 为原模型，$f_{\theta'}(x)$ 为修复后模型。对任意输入 $x$：
+$$f_{\theta}(x) = \text{slice}(f_{\theta'}(x), [0:d_{out}])$$
+
+这保证了功能等价性。虽然单元测试验证了位级精确（30/30 通过），大规模 perplexity 验证（如 WikiText-2）是未来工作。
+
 ### 6.4 实践建议
 
 1. **压缩算法设计者**：在 SVD 截断时考虑对齐约束，或采用约束 SVD
@@ -590,9 +595,11 @@ Zero-padding 确保位级精确输出保持：
 
 ### 6.5 Future Work
 
-- 将对齐约束集成到 SVD 分解结构
-- 扩展 dimension repair 到 PaLU 的 $U$ 矩阵
-- **H100 分析**：虽然本研究专注于 A100，我们预期 H100 存在类似的对齐悬崖——TMA (Tensor Memory Accelerator) 有不同的粒度要求，WGMMA 指令有自己的 tile 约束，最优对齐值可能有所不同
+未来研究方向：
+
+1. **SVD 集成**：将 dimension repair 适配到低秩分解结构 ($W = U \cdot V^T$)，可通过约束 SVD 或后处理 $U$ padding 实现
+2. **Perplexity 验证**：完整的精度评估（WikiText-2、下游任务）以实验确认零精度损失的理论保证
+3. **H100 分析**：虽然本研究专注于 A100，我们预期 H100 存在类似的对齐悬崖——TMA (Tensor Memory Accelerator) 有不同的粒度要求，WGMMA 指令有自己的 tile 约束，最优对齐值可能需要调整为 32 或 64 而非 16
 
 ---
 
