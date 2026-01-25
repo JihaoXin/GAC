@@ -1,35 +1,101 @@
-# GAC 论文审稿状态
-# 由 orchestrator.py --mode paper 自动管理
-
-status: in_progress  # in_progress | accepted | rejected
-
-# 目标评分
-target_score: 8  # >= 8/10 则 accept
-
-# 当前评分
-current_score: 0
-
-# 审稿历史
-reviews: []
-# 格式:
-# - iteration: 1
-#   timestamp: 2025-01-25T10:00:00
-#   score: 5
-#   log: auto_research/logs/orchestrator_paper_xxx.log
-
-# 论文元信息
+current_score: 7.5
 paper:
-  title: "When Smaller Is Slower: Dimensional Collapse in Compressed LLMs"
-  venue: EuroMLSys
-  template: SIGPLAN (acmart)
   format:
     columns: 2
-    pages: 6  # 不含引用
     font_size: 10pt
-
-# 审稿重点
+    pages: 6
+  template: SIGPLAN (acmart)
+  title: 'When Smaller Is Slower: Dimensional Collapse in Compressed LLMs'
+  venue: EuroMLSys
 review_focus:
-  - technical_quality: 40%
-  - presentation: 30%
-  - innovation: 20%
-  - writing: 10%
+- technical_quality: 40%
+- presentation: 30%
+- innovation: 20%
+- writing: 10%
+reviews:
+- iteration: 1
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T10:05:56.481626'
+- iteration: 2
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T10:20:31.604111'
+- iteration: 3
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T10:33:51.888405'
+- iteration: 4
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T10:47:27.739215'
+- iteration: 5
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T10:59:12.414812'
+- iteration: 6
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T11:12:33.092822'
+- iteration: 7
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T11:25:07.849520'
+- iteration: 9
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T11:43:43.689896'
+- iteration: 10
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T11:53:56.839654'
+- iteration: 11
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T11:57:10.786785'
+- iteration: 12
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T12:00:24.486357'
+- iteration: 13
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T12:03:38.233092'
+- iteration: 14
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T12:06:52.453985'
+- iteration: 15
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T12:10:06.752645'
+- iteration: 16
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T12:13:20.841751'
+- iteration: 17
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T12:16:34.398298'
+- iteration: 18
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T12:19:47.898285'
+- iteration: 19
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T12:23:00.932231'
+- iteration: 20
+  log: /home/xinj/G-Compress/auto_research/logs/orchestrator_paper_20260125_100153.log
+  score: 0
+  timestamp: '2026-01-25T12:26:14.502008'
+- iteration: 1
+  log: /home/xinj/G-Compress/auto_research/logs/AutoGAC_paper_20260125_132543.log
+  score: 7.5
+  timestamp: '2026-01-25T13:25:59.029116'
+- iteration: 1
+  log: /home/xinj/G-Compress/auto_research/logs/AutoGAC_paper_20260125_133249.log
+  score: 7.5
+  timestamp: '2026-01-25T13:33:08.050240'
+status: in_progress
+target_score: 8
