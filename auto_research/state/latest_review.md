@@ -8,21 +8,21 @@
 
 ## Summary
 
-This paper investigates an important but overlooked phenomenon in LLM compression: **dimensional collapse**, where post-training compression techniques produce irregular tensor dimensions that cause significant GPU performance degradation despite reducing FLOPs. The authors systematically study this phenomenon across three layers—PyTorch backend selection, CUDA kernel execution, and hardware constraints—on NVIDIA A100 GPUs.
+This paper investigates an important yet underexplored phenomenon in LLM compression: *dimensional collapse*. The authors observe that post-training compression methods (specifically SVD-based approaches like PaLU) often produce irregular tensor dimensions that violate GPU hardware alignment requirements, causing significant performance degradation despite reduced FLOPs.
 
-The key findings include: (1) PaLU-compressed Llama-3-8B has 96.9% of head dimensions misaligned; (2) `head_dim=107` causes 88% SDPA latency increase vs. `head_dim=96`; (3) FlashAttention does NOT fall back to slower backends but uses internal slow paths with 30-45% overhead; (4) Root causes are Tensor Core tile alignment (58% slowdown), vectorized load degradation (50% loss), and SDPA bandwidth efficiency (40% loss), while L2 cache waste (5.8%) is negligible.
+The paper systematically analyzes root causes across three layers: PyTorch backend selection, CUDA kernel behavior, and hardware constraints. A key finding is that FlashAttention does *not* fall back to slower backends but uses internal slow paths for misaligned dimensions. The authors identify Tensor Core alignment (58% impact), vectorized load degradation (50%), and SDPA bandwidth efficiency (40%) as primary causes, while ruling out L2 cache sector waste (5.8%) as insignificant.
 
-The proposed solution is a lightweight **Shape Contract** and **dimension repair** pass that pads dimensions to 8/16-aligned values, achieving 25-30% kernel-level speedup with only 3.7% memory overhead. End-to-end integration with SVD-based compression remains future work.
+Based on these findings, the paper proposes a Shape Contract formalization and a dimension repair pass that achieves 25-30% kernel-level speedup with 3.7% memory overhead. End-to-end validation with PaLU-compressed models is identified as future work.
 
 ---
 
 ## Overall Rating
 
-**Rating: Weak Accept (7/10)**
+**Rating: Weak Accept (7.5/10)**
 
-This paper addresses an important and practical problem with solid microbenchmark evidence. The root cause analysis is thorough and the insights are valuable for the systems community. However, the lack of end-to-end validation for the proposed dimension repair solution significantly weakens the contribution. The paper is well-written and the figures are generally clear, though some presentation issues need attention.
+This is a well-executed systems paper that identifies an important problem and provides solid microbenchmark evidence. The root cause analysis is thorough and methodologically sound. The paper has improved from prior versions with clearer scope statements and better figure quality. However, the lack of end-to-end validation for the proposed dimension repair solution remains a limitation. The paper honestly acknowledges this gap, which is commendable.
 
-**Confidence:** 4/5 (High confidence based on expertise in GPU optimization and LLM systems)
+**Confidence:** 4/5 (high confidence in systems/GPU optimization aspects)
 
 ---
 
@@ -30,170 +30,179 @@ This paper addresses an important and practical problem with solid microbenchmar
 
 | Dimension | Weight | Score | Weighted |
 |-----------|--------|-------|----------|
-| Technical Quality | 40% | 7/10 | 2.80 |
-| Paper Presentation | 30% | 7/10 | 2.10 |
+| Technical Quality | 40% | 7.5/10 | 3.00 |
+| Paper Presentation | 30% | 8/10 | 2.40 |
 | Innovation | 20% | 7/10 | 1.40 |
 | Writing Quality | 10% | 8/10 | 0.80 |
-| **Total** | 100% | - | **7.1/10** |
+| **Total** | 100% | - | **7.6/10** |
 
 ---
 
 ## Strengths
 
-1. **Important and Practical Problem**: The paper identifies a real gap between compression research (focused on accuracy-compression tradeoffs) and systems deployment (where alignment matters). The 88% latency increase from `head_dim=107` vs 96 is a compelling motivating example.
+1. **Important and practical problem**: Dimensional collapse is a real issue that affects practitioners deploying compressed LLMs. The 88% latency increase for D=107 vs D=96 is a compelling motivating example that clearly demonstrates the problem.
 
-2. **Thorough Root Cause Analysis**: The systematic investigation across three layers (PyTorch→CUDA→Hardware) with controlled experiments is excellent. Notably, debunking the "FlashAttention falls back to MATH" assumption (F2.1.1) is a valuable insight that corrects common misconceptions.
+2. **Rigorous root cause analysis**: The three-layer investigation (PyTorch → CUDA → Hardware) is methodologically sound. Testing and rejecting the FlashAttention fallback hypothesis (it uses slow paths internally, not backend fallback) is a valuable finding that corrects common misconceptions.
 
-3. **Rigorous Hypothesis Testing**: The C23 hardware-layer experiments cleanly isolate four hypotheses with quantified impact: Tensor Core alignment (58%), vectorized loads (50%), SDPA bandwidth (40%), and L2 cache (5.8% - negligible). This methodology is exemplary.
+3. **Quantitative hypothesis testing**: Table 2 clearly shows which hypotheses were confirmed (H1, H3, H4) vs not confirmed (H2), with specific impact percentages. This is excellent scientific practice.
 
-4. **Actionable Solution**: The Shape Contract formalization and dimension repair pass are simple, principled, and easy to implement. The 6.9× ROI (27% speedup / 3.7% overhead) is compelling.
+4. **Honest scope definition**: The paper explicitly states what is validated (kernel-level) vs future work (E2E integration). This transparency is appreciated and prevents overselling.
 
-5. **Honest Scope Limitation**: The authors clearly state that E2E integration with PaLU's SVD structure is future work, rather than overclaiming. This intellectual honesty is appreciated.
+5. **High-quality figures**: Figure 1's overview effectively communicates the problem with a clean two-panel design. Figure 3's staircase effect visualization is clear and compelling. Figure 4's root cause breakdown with error bars and [Y]/[N] markers is professionally done.
 
 ---
 
 ## Weaknesses
 
-1. **Incomplete End-to-End Validation**: The kernel-level speedups (25-30%) are not demonstrated in actual LLM inference. The C5 experiment has methodology issues (as acknowledged in `findings.yaml`), leaving the practical benefit uncertain. The 11.5× decode speedup is from PaLU compression itself, not dimension repair.
+1. **Incomplete E2E validation**: The dimension repair solution is only validated at kernel level. Section 6.4 shows PaLU compression benefits (11.5× decode speedup), but repair integration is explicitly future work. This limits practical impact claims.
 
-2. **Limited Scope of Compression Methods**: Only PaLU (low-rank SVD) is studied. The generalization to other compression methods (pruning, quantization, knowledge distillation) that may produce irregular dimensions is unclear.
+2. **Data source clarification needed**: Per findings.yaml, the "96.9% misaligned" claim originates from RAP theoretical analysis, while actual PaLU checkpoints (ratio 0.5-0.9) are 100% aligned due to quantization constraints. This distinction should be clearer in the paper.
 
-3. **Single GPU Architecture**: All experiments use A100. The paper claims GPU-agnostic insights but provides no validation on H100, RTX series, or other architectures where tile sizes and alignment requirements may differ.
+3. **Limited model/hardware coverage**: Only Llama-3-8B on A100 is tested. No results for other models or newer GPUs (H100) to demonstrate generalization.
 
-4. **Missing Accuracy Validation**: While the paper claims "bit-exact output preservation," perplexity and downstream task evaluation are explicitly marked as future work. For a systems paper, this might be acceptable, but readers will want this reassurance.
+4. **Run-to-run variance**: Table 5 notes D=107 baseline differs by ~6% between tables (2.064ms vs 2.192ms). While acknowledged, this suggests more trials or confidence intervals would strengthen the claims.
 
-5. **Figure 5 (Repair Tradeoff) Interpretation Issues**: The scatter plot shows per-dimension points, but the relationship between dimensions and their position in the tradeoff space is not clearly explained. Which points are D=107, D=114, etc.?
+5. **Missing comprehensive accuracy evaluation**: Claims "bit-exact output preservation" but validates only with unit tests (30/30). No perplexity or downstream task evaluation.
 
 ---
 
 ## Major Issues (Must Fix)
 
-### M1. E2E Validation Gap is a Critical Weakness
+### M1. Clarify "96.9% Misaligned" Data Source
 
-**Location**: §6.4 (End-to-End LLM Inference), Table 6, Figure 6
+**Location**: §1, §3.2, Figure 2
 
-**Issue**: The E2E results (Table 6, Figure 6) show PaLU compression benefits (11.5× decode speedup), but this is NOT from dimension repair. The "Scope Note" acknowledges this but buries the limitation. According to `research_state.yaml`, the C5 experiment has methodology problems where dimension analysis incorrectly detected 0% misalignment.
+**Issue**: The paper claims "96.9% of compressed dimensions are not 8-aligned" based on PaLU compression. However, per findings.yaml (F5.1-F5.4, I5), this data comes from RAP's theoretical Fisher information analysis, not actual PaLU checkpoints. All 24 available PaLU checkpoints (ratio 0.5-0.9) have 100% aligned dimensions due to quantization constraints.
 
-**Why it matters**: Readers will expect the proposed solution (dimension repair) to be validated E2E. Showing PaLU's compression benefits without repair validation is misleading even with the scope note.
-
-**Suggested Fix**: Either:
-1. Remove §6.4 entirely and focus purely on kernel-level contributions (preferred), OR
-2. Clearly state in the abstract/intro that E2E integration is future work, and rename §6.4 to "PaLU Compression Baseline (Future Work Context)" to avoid confusion.
-
-### M2. Table 5 vs Table 3 Inconsistency
-
-**Location**: Table 3 (D=107 latency 2.192ms) vs Table 5 (D=107 latency 2.064ms)
-
-**Issue**: The same dimension D=107 has different baseline latencies in different tables (2.192ms vs 2.064ms, ~6% difference). While the footnote in Table 5 explains "run-to-run variance," this undermines confidence in the measurements.
-
-**Why it matters**: For a systems paper, measurement consistency is crucial. 6% variance is high for CUDA event timing with 200 measurements.
+**Why it matters**: This is a factual accuracy issue that could confuse readers who try to reproduce the results with available PaLU models.
 
 **Suggested Fix**:
-1. Re-run both experiments with the same configuration and report consistent numbers, OR
-2. Report mean ± std across multiple runs to quantify variance properly.
+- Add clarification that 96.9% figure comes from theoretical rank allocation before quantization constraints are applied
+- Note in limitations that current PaLU implementation uses alignment constraints internally
+- Clarify that dimensional collapse problem applies to vanilla SVD compression without quantization
 
-### M3. Missing Per-Dimension Labels in Figure 5
+### M2. Provide Confidence Intervals for Key Measurements
 
-**Location**: Figure 5 (Repair Tradeoff)
+**Location**: Tables 1, 3, 5; Figures 3
 
-**Issue**: The scatter plot shows "each point represents a PaLU dimension (D=107-125)" but doesn't label which point is which dimension. This makes it impossible to understand the tradeoff for specific dimensions.
+**Issue**: Run-to-run variance of ~6% is noted, but most tables show single values without confidence intervals. Figure 4 has error bars, but Figure 3 lacks them.
 
-**Why it matters**: The key insight should be "for dimension X, you get Y% speedup at Z% overhead." Without labels, the figure is not actionable.
+**Why it matters**: Without error bars, it's unclear if differences like D=114 (2.049ms) vs D=117 (2.054ms) are statistically significant.
 
-**Suggested Fix**: Add text labels (e.g., "107", "114", "120") to at least the key points, or use a table instead if scatter plot is too cluttered.
+**Suggested Fix**:
+- Add ±std or 95% CI to all latency measurements in tables
+- Add error bars to Figure 3 (SDPA latency sweep)
+- State number of trials (currently in §3.1 but easy to miss)
+
+### M3. E2E Section Scope Confusion
+
+**Location**: §6.4, Figure 6, Table 6
+
+**Issue**: The E2E section shows PaLU compression benefits (11.5× decode speedup), but this is unrelated to dimension repair effectiveness. The "Scope" note helps but is easy to overlook.
+
+**Why it matters**: Readers may misinterpret Figure 6 as showing dimension repair benefits.
+
+**Suggested Fix**:
+- Consider renaming §6.4 to "End-to-End Compression Baseline (Not Repair)"
+- Add explicit sentence at section start: "Note: these results demonstrate PaLU compression benefits independent of dimension repair, which remains future work"
+- Alternatively, move to background/context rather than evaluation
 
 ---
 
 ## Minor Issues (Suggested)
 
-### m1. Abstract Length
+### m1. Figure 5 Dimension Labels
 
-**Location**: Abstract
+**Location**: Figure 5
 
-**Issue**: The abstract is well-written but slightly long for SIGPLAN format. The "Scope of validation" paragraph could be shortened.
+**Issue**: The scatter plot shows points for PaLU dimensions but only labels a few (d=107, d=114, etc.). The legend mentions "D=107-125" but most points are unlabeled.
 
-**Suggestion**: Condense to under 200 words by removing some implementation details.
+**Suggestion**: Add labels to more points or include a small table listing all dimension values with their coordinates.
 
-### m2. Notation Inconsistency: "D" vs "d" vs "head_dim"
+### m2. Terminology Consistency
 
-**Location**: Throughout the paper
+**Location**: Throughout
 
-**Issue**: The paper uses three different notations for head dimension:
-- `d` in equations (e.g., $d_{pad}$)
-- `D=107` in figures and tables
-- `head_dim=107` in text
+**Issue**: The paper uses "head_dim" (code), "D" (figures/tables), and "$d$" (equations) interchangeably. The notation section helps but readers may still be confused.
 
-**Suggestion**: Standardize on one notation. The notation paragraph (§2) helps but is easy to miss.
+**Suggestion**: Consider using only "D" in figures/tables and "$d$" in text/equations, avoiding "head_dim" except in code examples.
 
-### m3. FlashAttention Version Specificity
+### m3. Author Name Spelling
 
-**Location**: §2.2, §4.1
+**Location**: Page 1, author block
 
-**Issue**: The paper tests FlashAttention 2.7.4 specifically. It's unclear if findings generalize to other versions (e.g., FA3, xFormers).
+**Issue**: "Tian Lvy" appears to be a typo (likely "Tian Lyu" or similar).
 
-**Suggestion**: Add a brief discussion of version sensitivity or test on FA3 if available.
+**Suggestion**: Verify correct author name spelling.
 
-### m4. Table 1 Column Alignment
+### m4. FlashAttention Version Note
 
-**Location**: Table 1 (Backend latency)
+**Location**: §2.2, §3.1
 
-**Issue**: The "FAIL" entry for MEM_EFF D=107 breaks the numeric alignment of the column.
+**Issue**: Results are specific to FlashAttention 2.7.4. This may change in future versions.
 
-**Suggestion**: Use "---" or "N/A" with right-alignment to maintain visual consistency.
+**Suggestion**: Add note: "Results may vary with future FlashAttention versions that may implement internal alignment handling."
 
-### m5. Figure 1 Caption Completeness
+### m5. Table 1 FAIL Formatting
 
-**Location**: Figure 1 (Overview)
+**Location**: Table 1
 
-**Issue**: The caption doesn't explain the "SDPA Latency v. d Eff" subplot on the right side of Figure 1.
+**Issue**: "FAIL" entry breaks numeric alignment in the MEM_EFF column.
 
-**Suggestion**: Add description of all subplots in the caption.
+**Suggestion**: Use "---" or format consistently with right-alignment.
 
-### m6. Related Work Positioning
+### m6. ROI Metric Definition
 
-**Location**: §7
+**Location**: §6.3
 
-**Issue**: The Related Work section comes late (§7). For a systems paper, earlier positioning helps readers understand the gap.
+**Issue**: "6.9× ROI" is used without clear definition of what ROI means in this context.
 
-**Suggestion**: Consider moving key positioning statements to §1 (Introduction).
+**Suggestion**: Add explicit definition: "ROI = speedup percentage / memory overhead percentage"
 
 ---
 
 ## Questions for Authors
 
-1. **E2E Integration Feasibility**: For PaLU's SVD structure ($W = U \cdot V^T$), where exactly does dimension repair fit? Do you pad U's output or V's input? What's the expected implementation complexity?
+1. **PaLU alignment**: Given that all available PaLU checkpoints use aligned dimensions due to quantization, can you provide a concrete example of a compression method that produces misaligned dimensions in deployed practice?
 
-2. **Generalization to Structured Pruning**: Do pruning-based compression methods (e.g., SparseGPT with structured patterns) exhibit similar dimensional collapse? Is the problem unique to SVD-based methods?
+2. **H100 behavior**: Does H100's different Tensor Core architecture (FP8 support, different tile sizes) change the alignment requirements? Any preliminary data?
 
-3. **H100 Validation**: A100 uses different SM architecture than H100 (Hopper). Have you validated that the 8/16 alignment requirements still hold on newer hardware?
+3. **Integration complexity**: What specific challenges prevent integrating dimension repair into PaLU's SVD structure ($W = U \cdot V^T$)? Is it a fundamental issue or engineering effort?
 
-4. **Runtime Repair vs. Compile-Time Repair**: You propose compile-time dimension repair. Have you considered runtime padding (like TensorRT's implicit padding)? What's the overhead comparison?
+4. **Perplexity validation**: Even with bit-exact preservation at layer level, have you verified no numerical drift accumulates across the full model via perplexity measurement?
+
+5. **Compile-time vs runtime**: How does your compile-time repair compare to TensorRT's implicit padding in terms of kernel selection quality?
 
 ---
 
 ## Detailed Comments by Section
 
 ### Abstract
-Well-written with clear problem statement and contributions. The "Scope of validation" paragraph is honest but makes the contribution sound weaker. Consider restructuring to lead with kernel-level validation as the main contribution.
+Well-written and comprehensive. The "Scope of validation" clarification is honest and appropriate. Could be slightly more concise but acceptable for the venue.
 
 ### Introduction
-Good motivating example with PaLU. The 88% latency increase is compelling. The contribution list is clear but could be more concise (5 items is borderline too many for a 6-page paper).
+Strong motivation with the 88% latency increase example. The contribution list is clear. The "96.9% misaligned" claim needs source clarification (see M1).
 
-### Background/Related Work
-Background (§2) is adequate. The notation paragraph is helpful. Related Work (§7) is thorough but could engage more critically with TensorRT's implicit padding approach.
+### Background
+Appropriate level of detail. §2.2's correction of FlashAttention common beliefs is valuable. §2.3 on PaLU is brief but sufficient.
 
-### Method/Approach
-§3 (Phenomenon) and §4 (Root Cause Analysis) are the strongest sections. The systematic hypothesis testing is excellent. Figure 4 (Root Cause Breakdown) is very clear.
+### Dimensional Collapse (§3)
+Solid experimental methodology. Figure 2 (renamed from original numbering) shows dimension distribution clearly. Figure 3's staircase pattern is the key visualization—well done. Table 1 effectively contrasts backends.
 
-§5 (Shape-Aware Compression) is straightforward but adequate. The formalization (Eq. 1) is simple—perhaps too simple? It doesn't capture the multi-layer nature of compressed models.
+### Root Cause Analysis (§4)
+This is the paper's strongest section. The systematic hypothesis testing (Table 2) is excellent. The three-layer progression is logical and well-organized. Explicitly rejecting H2 (L2 cache) with data adds credibility.
 
-### Evaluation
-§6.1-6.3 (Kernel-level validation) are solid. The results convincingly show padding helps.
+### Shape-Aware Compression (§5)
+The Shape Contract formalization (Eq. 1) is clean and principled. The dimension repair description is clear. The accuracy preservation argument for zero-padding is convincing.
 
-§6.4 (E2E) is problematic as discussed in Major Issues. The scope note tries to address this but readers may still be confused.
+### Evaluation (§6)
+§6.1-6.3 (kernel-level) are solid with convincing results. §6.4 (E2E) has scope issues discussed in M3—needs clearer framing. §6.5 (Accuracy) makes appropriate claims but would benefit from perplexity data.
 
-### Conclusion
-Appropriately scoped with clear future work. Good.
+### Related Work (§7)
+Good coverage of compression methods, attention optimization, and inference frameworks. The positioning statement clearly differentiates from accuracy-focused compression work.
+
+### Conclusion (§8)
+Appropriate summary with explicit future work items. Well-scoped.
 
 ---
 
@@ -201,86 +210,39 @@ Appropriately scoped with clear future work. Good.
 
 | Figure/Table | Present? | Quality | Notes |
 |--------------|----------|---------|-------|
-| Fig 1 (Overview) | ✓ | Good | Caption could describe right subplot better |
-| Fig 2 (SDPA Latency) | ✓ | Good | Clear staircase effect visible |
-| Fig 3 (PaLU Dist) | ✓ | Good | Histogram is clear |
-| Fig 4 (Root Cause) | ✓ | Good | Excellent visualization of impact breakdown |
-| Fig 5 (Repair Tradeoff) | ✓ | Fair | **Missing dimension labels - Major Issue** |
-| Fig 6 (E2E Perf) | ✓ | Fair | Shows compression, not repair - confusing |
-| Table 1 (Backend) | ✓ | Good | FAIL alignment issue (minor) |
-| Table 2 (Hardware) | ✓ | Good | Clear hypothesis confirmation |
-| Table 3 (Padding) | ✓ | Good | Clear tradeoff |
-| Table 4 (Memory) | ✓ | Good | Simple and clear |
-| Table 5 (Repair) | ✓ | Fair | **Inconsistent baseline with Table 3** |
-| Table 6 (E2E) | ✓ | Fair | Shows compression, not repair |
+| Fig 1 (Overview) | ✓ | Good | Clear two-panel design showing problem and effect |
+| Fig 2 (PaLU Dist) | ✓ | Good | Clear histogram with percentages; 96.9% claim visible |
+| Fig 3 (SDPA Latency) | ✓ | Good | Key result; staircase effect clear; could add error bars |
+| Fig 4 (Root Cause) | ✓ | Excellent | Professional bar chart with error bars and [Y]/[N] markers |
+| Fig 5 (Repair Tradeoff) | ✓ | Good | Scatter with iso-ROI curves; some dimension labels present |
+| Fig 6 (E2E Perf) | ✓ | Fair | Shows compression benefit; scope confusion issue |
+| Table 1 (Backend) | ✓ | Good | Clear format; FAIL is informative |
+| Table 2 (Root Cause) | ✓ | Excellent | Clean hypothesis testing summary |
+| Table 3 (Padding) | ✓ | Good | Clear tradeoff demonstration |
+| Table 4 (Memory) | ✓ | Good | Simple and informative |
+| Table 5 (Repair Perf) | ✓ | Good | Comprehensive; variance note helpful |
+| Table 6 (E2E) | ✓ | Fair | Same scope concern as Fig 6 |
 
 ---
 
 ## Improvement Checklist for Writer Agent
 
 ### High Priority (Must Fix)
-- [ ] **M1**: Clarify that E2E results (§6.4) show PaLU compression benefits, NOT dimension repair. Consider removing or renaming the section.
-- [ ] **M2**: Resolve D=107 baseline latency inconsistency between Table 3 (2.192ms) and Table 5 (2.064ms).
-- [ ] **M3**: Add dimension labels to Figure 5 scatter plot, or convert to a table format.
+- [ ] **M1: Clarify 96.9% data source**: §1, §3.2, Figure 2 - add note about theoretical vs actual PaLU dimensions
+- [ ] **M2: Add confidence intervals**: Tables 1, 3, 5; Figure 3 - include ±std or 95% CI
+- [ ] **M3: Clarify E2E scope**: §6.4 - rename or add prominent note that results show compression, not repair
 
 ### Medium Priority (Recommended)
-- [ ] **m2**: Standardize notation (d vs D vs head_dim) throughout the paper.
-- [ ] **m5**: Update Figure 1 caption to describe all subplots.
-- [ ] Shorten abstract by ~20% for SIGPLAN guidelines.
-- [ ] Add brief discussion of FlashAttention version sensitivity (m3).
+- [ ] **m1: Figure 5 labeling**: Add more dimension labels to scatter plot
+- [ ] **m2: Terminology consistency**: Standardize D vs d vs head_dim usage
+- [ ] **m3: Author name**: Verify "Tian Lvy" spelling
+- [ ] **m6: Define ROI**: Add explicit ROI formula definition
 
 ### Low Priority (Optional)
-- [ ] **m1**: Minor abstract trimming.
-- [ ] **m4**: Fix Table 1 "FAIL" alignment.
-- [ ] **m6**: Consider earlier positioning of related work.
-- [ ] Add H100/newer GPU discussion to Future Work.
-
----
-
-## Visual Quality Assessment (Detailed)
-
-### Page-by-Page Review
-
-**Page 0 (Title, Abstract, Fig 1)**:
-- Title and author formatting: Good
-- Abstract: Good length, readable
-- Figure 1: Good size, both subplots visible. Left subplot (compression → misalignment flow) is clear. Right subplot (latency bars) is small but readable.
-
-**Page 1 (Intro, Background)**:
-- Two-column layout: Correct
-- Figure 2 (SDPA Latency): Good. Clear staircase pattern visible. X-axis labels readable. Legend placed well.
-- Text density: Appropriate
-
-**Page 2 (SDPA, Backend, Root Cause)**:
-- Figure 3 (PaLU Dist): Good histogram. Bar labels visible.
-- Table 1 (Backend): Readable. FAIL entry is visually distinct (bold would be better).
-- Figure 4 (Root Cause): Excellent bar chart. Clear percentage labels. Color coding for confirmed/not-confirmed is intuitive.
-- Table 2 (Hardware): Clean, well-formatted.
-
-**Page 3 (Solution, Evaluation)**:
-- Equation (1): Properly formatted optimization problem.
-- Table 3 (Padding): Clean numeric table.
-- Table 4 (Memory Overhead): Simple and clear.
-- Figure 5 (Repair Tradeoff): **Issue** - Points are unlabeled. The iso-ROI dashed lines are helpful but specific dimension values are not identifiable. Needs improvement.
-
-**Page 4 (E2E Results)**:
-- Table 5 (Repair Performance): Good format. Boldface for best results helps readability.
-- Figure 6 (E2E): Bar chart is clear but semantic interpretation is confusing (shows compression benefit, not repair).
-- Table 6 (E2E Metrics): Clean, but the 11.5× decode improvement dominates attention away from the paper's main contribution.
-
-**Page 5 (Related Work, Conclusion)**:
-- Text-heavy but appropriately so for Related Work.
-- No figures/tables. Layout is clean.
-
-**Page 6-7 (References)**:
-- References are properly formatted.
-- 11 references is reasonable for a 6-page paper, though more recent work on KV cache compression could be cited.
-
-### Overall Visual Grade: **7/10 (Good)**
-- No major formatting errors
-- Figures are generally publication-quality
-- Figure 5 needs improvement (labels)
-- Some minor alignment issues in tables
+- [ ] **m4: FlashAttention version note**: Mention version-specific behavior
+- [ ] **m5: Table 1 FAIL formatting**: Use consistent alignment
+- [ ] Add H100 discussion to future work
+- [ ] Consider adding perplexity validation to strengthen accuracy claims
 
 ---
 
@@ -289,28 +251,27 @@ Appropriately scoped with clear future work. Good.
 **Confidence Score:** 4/5
 
 **Expertise Areas:**
-- GPU optimization and CUDA programming
-- LLM inference systems
-- Tensor Core architecture and memory alignment
-- Attention mechanism implementations (FlashAttention, xFormers)
+- GPU kernel optimization and Tensor Core utilization
+- CUDA programming and memory access patterns
+- LLM inference systems (FlashAttention, vLLM, TensorRT)
+- Systems benchmarking methodology
 
 **Limitations:**
-- Did not verify NCU profiling data or access raw experimental logs
-- Limited knowledge of PaLU's internal SVD implementation details
-- Cannot verify the claim that repair is "bit-exact" without running the code
+- Cannot independently verify the 96.9% misalignment claim without running PaLU compression with specific configurations
+- Did not review implementation source code for dimension repair
+- Limited visibility into FlashAttention 2.7.4 internal dispatch logic
 
 ---
 
-## Summary Recommendation
+## Summary Verdict
 
-This paper makes valuable contributions in understanding dimensional collapse in compressed LLMs. The root cause analysis is thorough and the kernel-level validation is convincing. However, the gap between kernel-level speedups and practical E2E benefits is not bridged in this submission.
+This paper addresses a real and important problem in LLM compression deployment. The root cause analysis is the paper's main strength—systematic, well-designed, and clearly presented. The Shape Contract and dimension repair proposal are logical extensions of the findings.
 
-For acceptance, the authors should:
-1. Either remove the confusing E2E section or clearly reframe it as baseline context
-2. Fix the measurement inconsistencies
-3. Improve Figure 5 with dimension labels
+The main weakness remains the validation gap: kernel-level results are solid, but E2E integration is future work. The data source for the 96.9% misalignment claim needs clarification to ensure reproducibility.
 
-The paper is borderline acceptable as-is, but with these fixes, it would be a solid contribution to EuroMLSys.
+**Recommendation**: Weak Accept with revisions. The paper makes a solid contribution to understanding hardware-software interaction in LLM compression. Addressing the data source clarification (M1) and measurement consistency (M2) are essential. The E2E scope issue (M3) should be clarified but is acceptable given the honest acknowledgment.
+
+With the suggested fixes, this would be a valuable addition to EuroMLSys.
 
 ---
 

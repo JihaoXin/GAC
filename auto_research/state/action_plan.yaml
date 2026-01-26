@@ -1,194 +1,159 @@
-created_at: '2026-01-26T14:45:00+08:00'
+created_at: '2026-01-26T18:45:00+08:00'
 execution_order:
-  phase_1_parallel_experiments:
-    description: 并行运行独立实验（M1.step1 和 M2.step1）
+  phase_1_high_priority:
+    description: 高优先级任务并行执行
     parallel: true
     tasks:
-    - 'M1 step 1: 评估 E2E 修复可行性'
-    - 'M2 step 1: 重新运行 benchmark 确保一致性'
-  phase_2_m1_decision:
-    description: 根据 M1 评估结果决定走 A 还是 B 路径
-    parallel: false
-    tasks:
-    - 'M1 step 2: 执行修复 或 降级方案'
-  phase_3_writing:
-    description: 所有实验完成后统一写作
+    - 'M1: 澄清 96.9% 数据来源'
+    - 'M2 step 1: 提取置信区间数据'
+    - 'M3: 澄清 E2E section 范围'
+    - 'm3: 修复作者名拼写'
+  phase_2_tables_figures:
+    description: 更新 Tables 和 Figures（依赖 M2 step 1）
     parallel: true
     tasks:
-    - 'M2 step 2: 更新 Table 3 和 Table 5'
-    - 'M3: 为 Figure 5 添加维度标签'
-    - 'm1: 精简 abstract'
+    - 'M2 step 2: 更新 Tables 添加 ±std'
+    - 'm1: Figure 5 添加维度标签'
+  phase_3_minor_polish:
+    description: 次要修改
+    parallel: true
+    tasks:
     - 'm2: 统一符号'
-    - 'm3: FA 版本说明'
-    - 'm4: Table 1 FAIL 格式'
-    - 'm5: Figure 1 caption'
-    - 'm6: Related Work positioning'
+    - 'm4: FA 版本说明'
+    - 'm5: Table 1 FAIL 格式'
+    - 'm6: ROI 定义'
 issues:
 - actions:
-  - agent: experimenter
-    expected_output: 可行性报告 + 修复代码（如果可行）
+  - agent: writer
+    expected_output: 更新后的 main.tex，包含数据来源澄清
     status: pending
     step: 1
-    task: "评估修复 E2E 验证的可行性：\n1. 阅读 src/gcompress_bench/dimension_repair.py 中的 analyze_palu_dimensions()\n\
-      2. 检查 third_party/palu 模型结构，找到 per-head rank 维度存储位置\n3. 评估修复难度（简单/中等/困难）\n\n\
-      如果难度 <= 中等：\n  - 修复 analyze_palu_dimensions()\n  - 确保检测到 ~97% misalignment\n\
-      \n如果难度 = 困难：\n  - 报告具体困难点\n  - 建议降级到\"文字修改方案\"\n"
-  - agent: experimenter
-    depends_on:
-    - 1
-    expected_output: E2E 实验结果 或 降级方案说明
-    status: pending
-    step: 2
-    task: '根据 step 1 结果执行：
-
-
-      方案 A（代码修复成功）:
-
-      1. 修复 DimensionRepairer 对 PaLU SVD 分解的支持
-
-      2. 确保 inplace=True 避免内存翻倍
-
-      3. 重新运行 C5 实验
-
-      4. 验证 palu_repair vs palu 有 10-20% 加速
-
-
-      方案 B（代码修复困难）:
-
-      1. 跳过此步骤
-
-      2. 在论文中明确声明 E2E 集成是 future work
-
-      3. 修改 §6.4 标题为 "PaLU Compression Baseline"
-
-      '
+    task: "在以下位置添加数据来源澄清：\n\n1. §1 Introduction 中 \"96.9% misaligned\" 首次出现处：\n  \
+      \ 添加：\"This figure is derived from theoretical rank allocation\n   analysis\
+      \ [RAP] before quantization constraints are applied.\"\n\n2. §3.2 (或 Figure\
+      \ 2 caption)：\n   添加脚注或说明：\"Note: Current PaLU implementations apply internal\n\
+      \   alignment constraints (rank % 32 == 0), resulting in aligned dimensions.\n\
+      \   The 96.9% figure represents unconstrained low-rank decomposition.\"\n\n\
+      3. Limitations section (§8 或新增 subsection)：\n   添加：\"Our dimensional collapse\
+      \ analysis applies to vanilla SVD\n   compression without alignment constraints.\
+      \ Production implementations\n   like PaLU may include internal quantization\
+      \ that enforces alignment.\"\n\n修改 Latex/main.tex 中相关段落。\n"
   depends_on: []
-  description: '§6.4 展示的 11.5x decode 加速来自 PaLU 压缩本身，而非 dimension repair。
+  description: '论文声称"96.9% of compressed dimensions are not 8-aligned"，但：
 
-    C5 实验因 analyze_palu_dimensions() bug 导致 repair 没有生效。
+    - 该数据来自 RAP 的理论 Fisher 信息分析，非实际 PaLU checkpoint
 
-    审稿者建议两个选项：(1) 删除§6.4, (2) 重命名为 baseline context。
+    - 所有可用 PaLU checkpoint (ratio 0.5-0.9) 都是 100% 对齐的
 
-    '
-  failure_reason: 超过最大迭代次数 3
-  fallback_plan: '如果修复困难：
+    - 这是因为 PaLU 实现使用了量化约束，强制 rank 对齐到 32 的倍数
 
-    1. 在 abstract 中明确说明 E2E 是 future work
 
-    2. 将 §6.4 重命名为 "PaLU Compression Baseline (Context)"
-
-    3. 添加 scope note 解释 kernel-level vs E2E
+    reviewer 要求澄清数据来源，避免误导读者。
 
     '
   id: M1
-  inner_loop_count: 3
-  max_inner_loops: 3
+  inner_loop_count: 0
+  max_inner_loops: 1
   priority: high
-  status: failed
-  title: E2E Validation Gap
-  type: EXPERIMENT_REQUIRED
+  status: completed
+  title: Clarify 96.9% Misaligned Data Source
+  type: WRITING_ONLY
 - actions:
-  - agent: experimenter
-    expected_output: 一致的 benchmark 数据，包含 mean ± std
+  - agent: researcher
+    expected_output: 置信区间数据汇总 JSON 文件
     status: pending
     step: 1
-    task: "重新运行 SDPA benchmark 确保一致性：\n\n1. 使用相同配置重新测量 D=107,112,120,128\n2. 增加 trials\
-      \ 到 200 次（与论文声称一致）\n3. 计算 mean ± std\n4. 保存到 results/M2_benchmark_consistency/\n\
-      \n命令：\npython -m scripts.run_benchmarks --experiment sdpa_backend \\\n  --head_dims\
-      \ 107,112,120,128 \\\n  --trials 200 \\\n  --out results/M2_benchmark_consistency\n\
-      \n需要通过 Slurm 提交：\nsbatch --constraint=gpu_a100 --gres=gpu:a100:1 ...\n"
+    task: '从已有实验结果中提取 std 数据：
+
+
+      1. 检查 results/ 目录下的实验结果文件（summary.json, raw.json）
+
+      2. 查找是否已记录 std 或可以从 raw data 计算
+
+      3. 提取 D=107, 112, 120, 128 等关键维度的 mean ± std
+
+      4. 将数据汇总到 results/M2_confidence_intervals.json
+
+
+      如果原始数据不包含 std，报告缺失情况并建议是否需要重新运行。
+
+      '
   - agent: writer
     depends_on:
     - 1
-    expected_output: 更新后的 Table 3 和 Table 5
+    expected_output: 更新后的 Tables 和 Figure 3
     status: pending
     step: 2
-    task: '更新论文中的 Table 3 和 Table 5：
-
-      1. 使用 step 1 的统一数据更新 baseline latencies
-
-      2. 添加 ± std 列显示测量误差
-
-      3. 在 caption 中说明 "Mean ± std over 200 trials"
-
-      4. 确保两表中相同维度使用相同 baseline 数据
-
-      '
+    task: "更新论文中的 Tables 和 Figure：\n\n1. Table 1: 添加 ±std 列（如果空间不足，可用脚注说明 std 范围）\n\
+      2. Table 3: 添加 ±std 列\n3. Table 5: 添加 ±std 列，确保与 Table 3 使用一致的 baseline\n4.\
+      \ Figure 3: 如果需要添加 error bars，更新绘图脚本\n   (scripts/plot_results.py 或相关脚本)\n5.\
+      \ 在 §3.1 Methodology 中明确说明：\"All measurements report\n   mean ± standard deviation\
+      \ over 200 trials.\"\n\n使用 step 1 提取的数据更新 Latex/main.tex。\n"
   depends_on: []
-  description: 'D=107 baseline latency 在 Table 3 是 2.192ms，在 Table 5 是 2.064ms，差 6%。
+  description: 'Reviewer 指出：
 
-    审稿者认为 6% variance 对 CUDA event timing with 200 measurements 来说太高。
+    - Tables 1, 3, 5 缺少置信区间
+
+    - Figure 3 缺少 error bars
+
+    - 6% run-to-run variance 需要明确展示
+
+
+    当前实验已使用 200 trials，数据存在但未在论文中展示 std。
 
     '
   id: M2
   inner_loop_count: 0
   max_inner_loops: 2
   priority: high
-  status: in_progress
-  title: Table 3 vs Table 5 Inconsistency
-  type: EXPERIMENT_REQUIRED
+  status: completed
+  title: Add Confidence Intervals to Measurements
+  type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: 带维度标签的 Figure 5
+    expected_output: 更新后的 §6.4 和 Figure 6 caption
     status: pending
     step: 1
-    task: '为 Figure 5 添加维度标签：
-
-
-      方案 A（推荐）：
-
-      1. 在散点图中为关键点添加文本标签（107, 114, 117, 120, 121, 125）
-
-      2. 使用 matplotlib annotate() 或手动标注
-
-
-      方案 B（替代）：
-
-      1. 将散点图改为表格格式
-
-      2. 列：Dimension | Speedup (%) | Overhead (%) | ROI
-
-
-      选择方案 A，因为可视化效果更好。
-
-      修改 scripts/plot_results.py 中生成 Figure 5 的代码。
-
-      '
+    task: "修改 §6.4 以澄清范围：\n\n方案 A（推荐）：重命名 + 添加说明\n1. 将 section 标题改为：\"6.4 End-to-End\
+      \ Compression Baseline\"\n   或 \"6.4 PaLU Compression Performance (Context)\"\
+      \n2. 在 section 开头添加显著说明（用 \\paragraph{Scope} 或 italics）：\n   \"Note: This section\
+      \ demonstrates the performance benefits of PaLU\n   compression independent\
+      \ of our proposed dimension repair, which is\n   validated at kernel-level in\
+      \ §6.3. E2E integration of repair into\n   PaLU's SVD structure is identified\
+      \ as future work (see §8).\"\n3. 更新 Figure 6 caption 添加类似说明\n\n方案 B（替代）：移动到\
+      \ Background\n- 如果空间紧张，可将 §6.4 内容移到 §2 作为 PaLU 背景介绍\n\n推荐方案 A，保持在 Evaluation\
+      \ 但明确范围。\n"
   depends_on: []
-  description: 'Figure 5 (Repair Tradeoff) 散点图显示了各维度的 speedup vs overhead，
+  description: '§6.4 展示 PaLU 11.5x decode 加速，但这是压缩本身的收益，非 dimension repair。
 
-    但没有标注每个点对应哪个维度。审稿者无法判断具体维度的 tradeoff。
+    Reviewer 建议：(1) 重命名 section，或 (2) 添加显著说明。
 
     '
   id: M3
   inner_loop_count: 0
   max_inner_loops: 1
   priority: high
-  status: pending
-  title: Missing Per-Dimension Labels in Figure 5
+  status: completed
+  title: Clarify E2E Section Scope
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: 精简后的 abstract
+    expected_output: 带维度标签的 Figure 5
     status: pending
     step: 1
-    task: '精简 abstract 至 200 词以下：
-
-      1. 删减或合并 "Scope of validation" 段落
-
-      2. 保留核心贡献声明
-
-      3. 使用更紧凑的表达
-
-      '
+    task: "为 Figure 5 添加维度标签：\n\n1. 修改 scripts/plot_results.py（或相关绘图脚本）\n2. 使用 matplotlib\
+      \ annotate() 为关键点添加标签：\n   - d=107, d=114, d=117, d=120, d=121, d=125\n3. 确保标签不重叠（使用\
+      \ adjustText 或手动调整位置）\n4. 重新生成 Latex/figures/fig5_repair_tradeoff.pdf\n"
   depends_on: []
-  description: Abstract 略长，可以删减 'Scope of validation' 部分
+  description: 'Figure 5 散点图缺少具体维度标签，reviewer 无法判断每个点对应哪个维度。
+
+    '
   id: m1
   inner_loop_count: 0
   max_inner_loops: 1
-  priority: low
-  status: pending
-  title: Abstract Length
+  priority: medium
+  status: completed
+  title: Figure 5 Dimension Labels
   type: WRITING_ONLY
 - actions:
   - agent: writer
@@ -197,63 +162,92 @@ issues:
     step: 1
     task: '统一符号使用：
 
-      1. 公式中使用 d（保持不变，数学规范）
 
-      2. 图表标签改用 d=107 而非 D=107
+      1. 公式中：保持 $d$（数学惯例）
 
-      3. 文字中使用 "head dimension d=107" 或 "d=107"
+      2. 图表标签：统一使用 $d$=107（而非 D=107）
 
-      4. 在 §2 Notation 段落中明确定义
+      3. 正文中：使用 "head dimension $d$=107" 或简写 "$d$=107"
+
+      4. 代码示例：可保留 head_dim（注明是代码变量）
+
+      5. 在 §2 Notation 段落确保定义清晰
+
+
+      全局搜索替换 Latex/main.tex 中的 "D=" 为 "$d$="。
+
+      注意保留正确的上下文（如 "2D" 不应修改）。
 
       '
   depends_on: []
-  description: '论文混用三种符号：d（公式中）、D=107（图表中）、head_dim=107（文字中）
+  description: '论文混用 head_dim (code), D (figures), d (equations)。
+
+    虽然 Notation section 有定义，但仍可能造成混淆。
 
     '
   id: m2
   inner_loop_count: 0
   max_inner_loops: 1
   priority: medium
-  status: pending
-  title: Notation Inconsistency (d vs D vs head_dim)
+  status: completed
+  title: Terminology Consistency (d vs D vs head_dim)
   type: WRITING_ONLY
 - actions:
-  - agent: researcher
-    expected_output: 版本敏感性分析
+  - agent: writer
+    expected_output: 正确的作者名拼写
     status: pending
     step: 1
-    task: '研究 FlashAttention 版本行为：
+    task: '验证并修复作者名拼写：
 
-      1. 检查 FA 2.x vs 3.x 的 alignment 处理差异
 
-      2. 查看 release notes 中关于 head_dim 支持的说明
+      1. 检查 Latex/main.tex 中的 \author 块
 
-      3. 总结一句话添加到论文
+      2. 确认正确拼写（可能是 "Tian Lyu"）
 
-      '
-  - agent: writer
-    depends_on:
-    - 1
-    expected_output: 更新后的论文
-    status: pending
-    step: 2
-    task: '在 §2.2 或 §4.1 添加：
-
-      "Our findings are based on FlashAttention 2.7.4;
-
-      FA3 uses a different tiling strategy that may exhibit different behavior."
+      3. 如果无法确认，保持现状并标记为需要作者确认
 
       '
   depends_on: []
-  description: '论文使用 FlashAttention 2.7.4，但未讨论版本敏感性（是否适用于 FA3, xFormers）
+  description: '"Tian Lvy" 可能是拼写错误（应为 "Tian Lyu" 或类似）。
+
+    这是基本错误，需要立即修复。
 
     '
   id: m3
   inner_loop_count: 0
   max_inner_loops: 1
-  priority: medium
-  status: pending
-  title: FlashAttention Version Specificity
+  priority: high
+  status: completed
+  title: Author Name Spelling
+  type: WRITING_ONLY
+- actions:
+  - agent: writer
+    expected_output: 添加版本说明的论文
+    status: pending
+    step: 1
+    task: '在 §2.2 或 §4.1 添加版本说明：
+
+
+      "Our analysis is based on FlashAttention 2.7.4 (CUDA 12.x).
+
+      Future versions may implement internal alignment handling that
+
+      changes the observed behavior."
+
+
+      可以作为脚注或正文句子。
+
+      '
+  depends_on: []
+  description: '结果基于 FlashAttention 2.7.4，未来版本可能不同。
+
+    '
+  id: m4
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: low
+  status: completed
+  title: FlashAttention Version Note
   type: WRITING_ONLY
 - actions:
   - agent: writer
@@ -262,162 +256,160 @@ issues:
     step: 1
     task: '修复 Table 1 格式：
 
-      1. 将 ''FAIL'' 改为 ''---'' 或 ''N/A''
+
+      1. 将 "FAIL" 改为 "---" 或 "N/A"
 
       2. 确保右对齐
 
-      3. 可选：添加脚注解释 ''---'' 表示 backend unavailable
+      3. 可选：添加表格脚注 "--- indicates backend unavailable"
 
       '
   depends_on: []
-  description: Table 1 中 MEM_EFF D=107 的 'FAIL' 破坏了数值对齐
-  id: m4
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: low
-  status: pending
-  title: Table 1 FAIL Alignment
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: 完整的 Figure 1 caption
-    status: pending
-    step: 1
-    task: '更新 Figure 1 caption：
+  description: 'Table 1 中 "FAIL" 破坏数值对齐。
 
-      1. 描述左侧流程图：compression → misaligned dims → slowdown
-
-      2. 描述右侧图表：SDPA latency bars for different head_dim values
-
-      3. 保持 caption 简洁（2-3 句）
-
-      '
-  depends_on: []
-  description: Figure 1 caption 没有解释右侧的 'SDPA Latency v. d Eff' subplot
+    '
   id: m5
   inner_loop_count: 0
   max_inner_loops: 1
-  priority: medium
-  status: pending
-  title: Figure 1 Caption Completeness
+  priority: low
+  status: completed
+  title: Table 1 FAIL Formatting
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: 改进的 Introduction positioning
+    expected_output: 包含 ROI 定义的论文
     status: pending
     step: 1
-    task: "考虑以下选项（任选其一）：\nA) 保持现状（符合 systems paper 惯例）\nB) 在 §1 添加 1-2 句 positioning：\n\
-      \   \"Unlike prior work that optimizes for FLOP reduction, we focus on...\"\n\
-      推荐方案 B，添加简短 positioning。\n"
+    task: '在 §6.3 首次使用 ROI 时添加定义：
+
+
+      "We define ROI (Return on Investment) as the ratio of
+
+      speedup percentage to memory overhead percentage:
+
+      $\text{ROI} = \Delta\text{speedup}(\%) / \Delta\text{memory}(\%)$."
+
+
+      例如：25% speedup / 3.7% memory = 6.9× ROI
+
+      '
   depends_on: []
-  description: Related Work (§7) 位置较晚，可考虑将关键定位移到 §1
+  description: '§6.3 使用 "6.9× ROI" 但未定义 ROI 含义。
+
+    '
   id: m6
   inner_loop_count: 0
   max_inner_loops: 1
   priority: low
-  status: pending
-  title: Related Work Positioning
+  status: completed
+  title: ROI Metric Definition
   type: WRITING_ONLY
-planner_summary: '本次 review 评分 7.1/10 (Weak Accept)，主要问题：
-
-  1. M1 (E2E Validation Gap): §6.4 展示的是 PaLU 压缩收益而非 dimension repair 收益，C5 实验有 bug
-
-  2. M2 (Table Inconsistency): D=107 在 Table 3 (2.192ms) vs Table 5 (2.064ms) 差 6%
-
-  3. M3 (Figure 5 Labels): 散点图缺少具体维度标签
-
-
-  策略：
-
-  - M1: 复杂度高，需要修复代码。提供两个选项：(1)修复代码重跑E2E, (2)重新定义§6.4为baseline context
-
-  - M2: 需要重新运行 benchmark 确保一致性，添加 mean±std
-
-  - M3: 纯图表修改，可以快速完成
-
-  - 多个 Minor Issues 都是 WRITING_ONLY，在实验完成后统一处理
-
-  '
-review_iteration: 2
-review_score: 7.1
+notes:
+- 本轮所有 Major Issues 都是 WRITING_ONLY，无需 GPU 实验
+- M1 上一轮已确认无法通过实验解决（所有 PaLU checkpoint 100% 对齐）
+- M2 的 step 1 是提取已有数据，不是重新实验
+- 如果原始数据缺少 std，可能需要短暂的 benchmark 重跑
+planner_summary: "本次 review 评分 7.5/10 (Weak Accept)。与上一轮相比，reviewer 更关注数据来源澄清和展示一致性。\n\
+  \n关键变化：\n1. M1 从\"E2E validation gap\"变为\"96.9% 数据来源澄清\"——这是 WRITING_ONLY，因为 findings.yaml\n\
+  \   已经确认问题根源是 RAP 理论分析 vs 实际 PaLU 实现的差异\n2. M2 要求置信区间——当前数据已有 200 trials，需要添加 ±std\
+  \ 展示\n3. M3 要求 E2E section 范围澄清——纯文字修改\n\n策略：\n- 所有 Major Issues 都是 WRITING_ONLY（M1\
+  \ 上一轮已验证无法通过实验解决）\n- 优先完成 M1-M3 的文字修改\n- Minor issues 按优先级处理\n- 不再尝试 E2E 实验（已确认所有\
+  \ PaLU checkpoint 100% 对齐）\n"
+review_iteration: 3
+review_score: 7.5
 success_criteria:
   expected_score_improvement:
-    current: 7.1
-    with_M1_resolved: 8.0
-    with_M2_M3_fixed: 7.5
+    current: 7.5
+    with_M1_M2_M3_fixed: 8.0
     with_all_minor: 8.2
   must_complete:
-  - 'M2: 修复 Table 3/5 不一致，添加 mean±std'
-  - 'M3: 为 Figure 5 添加维度标签'
-  - 'm4: Table 1 FAIL → ''---'''
-  - 'm5: Figure 1 caption 补全'
+  - 'M1: 澄清 96.9% 数据来源（消除事实准确性问题）'
+  - 'M2: 添加置信区间（提升数据可信度）'
+  - 'M3: 澄清 E2E section 范围（避免误解）'
+  - 'm3: 修复作者名拼写（基本正确性）'
   nice_to_have:
-  - 'm1: abstract 精简'
-  - 'm6: Related Work positioning'
+  - 'm4: FA 版本说明'
   should_complete:
-  - 'M1: E2E 验证（修复代码 或 明确降级）'
+  - 'm1: Figure 5 维度标签'
   - 'm2: 符号统一'
-  - 'm3: FA 版本说明'
+  - 'm5: Table 1 格式'
+  - 'm6: ROI 定义'
 target_score: 8.0
 writing_tasks:
 - changes_required:
-  - change: 更新 D=107 baseline 数据，添加 ±std
-    section: Table 3 (§6.2)
-  - change: 使用与 Table 3 一致的 baseline，添加 ±std
-    section: Table 5 (§6.4)
-  - change: 添加 'Mean ± std over 200 trials'
-    section: Table captions
-  description: 更新 Table 3 和 Table 5 使用一致数据
+  - change: 添加数据来源说明：theoretical rank allocation before quantization
+    section: §1 Introduction
+  - change: 添加脚注说明 PaLU 内置对齐约束
+    section: §3.2 / Figure 2 caption
+  - change: 明确适用范围：vanilla SVD without alignment constraints
+    section: §8 Limitations
+  description: 澄清 96.9% 数据来源
+  id: M1
+  target_files:
+  - Latex/main.tex
+- changes_required:
+  - change: 添加 ±std 列或脚注
+    section: Table 1, 3, 5
+  - change: 添加 error bars（如需要）
+    section: Figure 3
+  - change: 明确说明 200 trials mean ± std
+    section: §3.1 Methodology
+  description: 添加置信区间
   id: M2
   target_files:
   - Latex/main.tex
-- changes_required:
-  - change: 为散点添加 '107', '114', '117', '120', '121', '125' 文本标签
-    section: Figure 5
-  description: 为 Figure 5 添加维度标签
-  id: M3
-  target_files:
-  - Latex/figures/fig5_repair_tradeoff.pdf
   - scripts/plot_results.py
 - changes_required:
-  - change: 删减或合并 'Scope of validation' 内容，控制在 200 词
-    section: Abstract
-  description: 精简 abstract
-  id: m1
+  - change: 改为 'End-to-End Compression Baseline'
+    section: §6.4 title
+  - change: 添加 Scope note
+    section: §6.4 opening
+  - change: 添加范围说明
+    section: Figure 6 caption
+  description: 澄清 E2E section 范围
+  id: M3
   target_files:
   - Latex/main.tex
 - changes_required:
-  - change: 图表标签改用 d=107；文字中用 'head dimension d=107'
+  - change: 添加 d=107, 114, 117, 120, 121, 125 标签
+    section: Figure 5
+  description: Figure 5 维度标签
+  id: m1
+  target_files:
+  - scripts/plot_results.py
+  - Latex/figures/fig5_repair_tradeoff.pdf
+- changes_required:
+  - change: D=xxx → $d$=xxx
     section: Throughout
-  description: 统一符号 d/D/head_dim
+  description: 符号统一
   id: m2
   target_files:
   - Latex/main.tex
 - changes_required:
-  - change: 添加一句关于 FA 2.7.4 版本特异性的说明
-    section: §2.2 or §4.1
-  description: 添加 FlashAttention 版本说明
+  - change: 验证 'Tian Lvy' → 'Tian Lyu' 或正确拼写
+    section: \author block
+  description: 作者名拼写
   id: m3
   target_files:
   - Latex/main.tex
 - changes_required:
-  - change: '''FAIL'' → ''---'' 并确保右对齐'
-    section: Table 1
-  description: 修复 Table 1 FAIL 格式
+  - change: 添加 FlashAttention 2.7.4 版本说明
+    section: §2.2 or §4.1
+  description: FA 版本说明
   id: m4
   target_files:
   - Latex/main.tex
 - changes_required:
-  - change: 添加对右侧 subplot 的描述
-    section: Figure 1 caption
-  description: 补全 Figure 1 caption
+  - change: '''FAIL'' → ''---'''
+    section: Table 1
+  description: Table 1 格式
   id: m5
   target_files:
   - Latex/main.tex
 - changes_required:
-  - change: 添加 1-2 句与 prior work 的 positioning
-    section: §1 Introduction
-  description: 改进 Introduction positioning
+  - change: 添加 ROI 公式定义
+    section: §6.3
+  description: ROI 定义
   id: m6
   target_files:
   - Latex/main.tex
