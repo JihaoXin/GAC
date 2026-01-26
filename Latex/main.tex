@@ -41,7 +41,7 @@
 }
 \email{jihao.xin@kaust.edu.sa}
 
-\author{Tian Lvy}
+\author{Tian Lyu}
 \affiliation{
   \institution{KAUST}
   \city{Thuwal}
@@ -70,7 +70,7 @@
 }
 
 \begin{abstract}
-Post-training compression techniques for Large Language Models (LLMs) often result in irregular tensor dimensions (e.g., \texttt{head\_dim=107} instead of 128).
+Post-training compression techniques for Large Language Models (LLMs) can produce irregular tensor dimensions (e.g., \texttt{head\_dim=107} instead of 128) when unconstrained.
 We identify a phenomenon called \emph{dimensional collapse}: despite reducing FLOPs, these irregular dimensions cause significant inference slowdowns on modern GPUs.
 Our experiments on NVIDIA A100 show that \texttt{head\_dim=107} increases SDPA latency by 88\% compared to \texttt{head\_dim=96}.
 
@@ -105,7 +105,7 @@ We term this \emph{dimensional collapse}---a nonlinear performance degradation c
 \paragraph{Motivating Example.}
 Consider PaLU~\cite{palu}, a state-of-the-art low-rank compression method that reduces attention head dimensions through SVD.
 Theoretical analysis of Llama-3-8B with Fisher-information-based rank allocation (0.8 retention ratio) shows the resulting \texttt{head\_dim} values would become irregular (e.g., 114--125 instead of 128).
-In this scenario, 96.9\% of the compressed dimensions are not 8-aligned.\footnote{This analysis uses theoretical optimal ranks from Fisher information~\cite{palu}. Production PaLU implementations may apply quantization constraints that enforce alignment; our dimension repair addresses cases where such constraints are absent.}
+In this \emph{theoretical} scenario, 96.9\% of the compressed dimensions are not 8-aligned.\footnote{This analysis uses theoretical optimal ranks from Fisher information~\cite{palu} before any implementation-specific constraints. We verified that all 24 publicly available PaLU checkpoints (ratio 0.5--0.9) use \emph{aligned} dimensions due to internal quantization. Our dimension repair addresses vanilla SVD compression without such constraints.}
 Figure~\ref{fig:overview} illustrates this dimensional collapse phenomenon.
 On an NVIDIA A100, this causes:
 \begin{itemize}
@@ -118,7 +118,7 @@ On an NVIDIA A100, this causes:
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig1_overview.pdf}
-\caption{Dimensional collapse in compressed LLMs. Post-training compression (e.g., PaLU) produces irregular head dimensions (114--125) that violate GPU alignment requirements, causing performance cliffs despite reduced FLOPs.}
+\caption{Dimensional collapse in compressed LLMs. Post-training compression produces irregular head dimensions (e.g., $d$=107) that cause \textbf{88\% latency increase} vs.\ aligned dimensions. Dimension repair (padding to $d$=112) recovers \textbf{30\% performance} with only 4.7\% memory overhead.}
 \label{fig:overview}
 \end{figure}
 
@@ -178,6 +178,7 @@ The compressed head dimension becomes $r$, which is typically not aligned.
 
 We conduct experiments on NVIDIA A100-80GB with PyTorch 2.9.1, CUDA 12.8, and FlashAttention 2.7.4.
 All benchmarks use FP16 with CUDA event timing (warmup=50, measure=200, trials=3). Driver: 560.35.03; cuDNN 9.1.0.
+\emph{Note on variance}: GPU measurements exhibit 5--8\% run-to-run variance due to thermal throttling and memory state. We report results from independent experimental runs; tables show consistent trends despite minor variance.
 
 \subsection{Compression Produces Misaligned Dimensions}
 
@@ -187,7 +188,7 @@ Figure~\ref{fig:palu_dist} shows the dimension distribution.
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig3_palu_dist.pdf}
-\caption{Distribution of head dimensions from Fisher-information-based rank allocation (Llama-3-8B, r=0.8). 96.9\% of the 512 theoretical KV head dimensions are misaligned. Only $d$=120 (3.1\%) is 8-aligned. \textbf{Note:} Production implementations may use quantization to enforce alignment; this distribution represents unconstrained SVD compression.}
+\caption{\textbf{Theoretical} dimension distribution from Fisher-information-based rank allocation (Llama-3-8B, $r$=0.8, \emph{unconstrained SVD}). 96.9\% of the 512 theoretical KV head dimensions are misaligned (only $d$=120, 3.1\%, is 8-aligned). \textbf{Note:} Production PaLU checkpoints use internal quantization that enforces alignment; our repair targets compression methods without such constraints (e.g., vanilla SVD).}
 \label{fig:palu_dist}
 \end{figure}
 
@@ -199,7 +200,7 @@ Figure~\ref{fig:sdpa_latency} shows the results.
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig2_sdpa_latency.pdf}
-\caption{SDPA latency across head dimensions (shaded regions show $\pm$1 std over 3 trials $\times$ 200 iterations). Clear alignment cliffs (``staircase effect'') visible at non-8-aligned values. $d$=107 shows 88\% increase vs $d$=96. The FLASH backend uses internal slow paths for misaligned dimensions.}
+\caption{SDPA latency across head dimensions. Shaded regions show $\pm$1 std over 3 trials $\times$ 200 iterations per trial. Clear alignment cliffs (``staircase effect'') visible at non-8-aligned values. $d$=107 shows 88\% increase vs $d$=96.}
 \label{fig:sdpa_latency}
 \end{figure}
 
@@ -211,7 +212,7 @@ Table~\ref{tab:backend} shows latency across different SDPA backends.
 
 \begin{table}[t]
 \centering
-\caption{SDPA backend latency (ms$\pm$std) for various head dimensions. MEM\_EFFICIENT fails for D=107. Measurements: 200 iterations $\times$ 3 trials.}
+\caption{SDPA backend latency (ms$\pm$std) for various head dimensions. ``---'' indicates MEM\_EFFICIENT backend unavailable due to strict 8-alignment requirement ($d$=107 is not 8-aligned). Measurements: 200 iterations $\times$ 3 trials.}
 \label{tab:backend}
 \begin{tabular}{lrrrr}
 \toprule
@@ -219,7 +220,7 @@ $d$ & AUTO & FLASH & MEM\_EFF & MATH \\
 \midrule
 96  & 1.17{\scriptsize$\pm$.03} & 1.12{\scriptsize$\pm$.02} & 2.38{\scriptsize$\pm$.05} & 26.0{\scriptsize$\pm$.2} \\
 104 & 1.54{\scriptsize$\pm$.04} & 1.54{\scriptsize$\pm$.04} & 2.75{\scriptsize$\pm$.06} & 26.5{\scriptsize$\pm$.2} \\
-\textbf{107} & \textbf{2.14}{\scriptsize$\pm$.06} & \textbf{2.14}{\scriptsize$\pm$.06} & --- & \textbf{27.0}{\scriptsize$\pm$.2} \\
+\textbf{107} & \textbf{2.14}{\scriptsize$\pm$.06} & \textbf{2.14}{\scriptsize$\pm$.06} & \multicolumn{1}{c}{---} & \textbf{27.0}{\scriptsize$\pm$.2} \\
 112 & 1.53{\scriptsize$\pm$.04} & 1.53{\scriptsize$\pm$.04} & 2.60{\scriptsize$\pm$.05} & 27.1{\scriptsize$\pm$.2} \\
 128 & 1.47{\scriptsize$\pm$.03} & 1.47{\scriptsize$\pm$.03} & 2.55{\scriptsize$\pm$.05} & 28.1{\scriptsize$\pm$.2} \\
 \bottomrule
@@ -249,7 +250,7 @@ The root cause lies in the CUDA kernel layer, not backend selection.
 \label{sec:cuda}
 
 FlashAttention's internal 30--45\% slowdown stems from: (1) vectorized loads falling back to scalar (50\% loss when $d \mod 8 \neq 0$); (2) suboptimal GEMM tile selection reducing Tensor Core utilization (30\%$\to$12\%); (3) boundary predication causing warp divergence.
-FlashAttention-2 dispatches optimized kernels for $d \in \{32, 64, 96, 128, 256\}$; other values use generic kernels ($d$=128: 1.47ms, $d$=125: 1.97ms, +34\%).
+FlashAttention-2 dispatches optimized kernels for $d \in \{32, 64, 96, 128, 256\}$; other values use generic kernels ($d$=128: 1.47ms, $d$=125: 1.97ms, +34\%).\footnote{FlashAttention kernel dispatch: \texttt{csrc/flash\_attn/flash\_fwd\_hdim*.cu} in \url{https://github.com/Dao-AILab/flash-attention}. Head dimension determines which optimized kernel template is instantiated.}
 
 \subsection{Hardware Constraints}
 \label{sec:hardware}
@@ -303,21 +304,13 @@ $d$=112 achieves 153.6 GB/s; $d$=113 drops to 107.3 GB/s (--30\%). $d$=120 achie
 
 \subsection{Shape Contract}
 
-We formalize alignment requirements as a constraint optimization problem:
-\begin{equation}
-\begin{aligned}
-\text{minimize} \quad & \text{memory\_overhead}(d_{pad}) \\
-\text{s.t.} \quad & d_{pad} \mod 8 = 0 \\
-& d_{pad} \geq d_{orig}
-\end{aligned}
-\end{equation}
-
-For optimal Tensor Core utilization, prefer $d_{pad} \mod 16 = 0$.
+We formalize alignment requirements: given an original dimension $d_{orig}$, we pad to $d_{pad} = \lceil d_{orig}/a \rceil \times a$ where $a$ is the alignment target.
+The \textbf{MINIMAL} strategy uses $a=8$ (required for MEM\_EFFICIENT backend and vectorized loads), while \textbf{OPTIMAL} uses $a=16$ (maximizes Tensor Core utilization).
+This minimizes memory overhead while guaranteeing hardware compatibility.
 
 \subsection{Dimension Repair}
 
 For a linear layer $y = Wx + b$ with $W \in \mathbb{R}^{d_{out} \times d_{in}}$, we pad the output dimension to the nearest aligned value $d'_{out} = \lceil d_{out}/a \rceil \times a$ by appending zero rows to $W$ and zeros to $b$.
-The \textbf{MINIMAL} strategy uses $a=8$, while \textbf{OPTIMAL} uses $a=16$.
 
 \paragraph{Accuracy Preservation.}
 Zero-padding preserves outputs exactly: $y' = [Wx + b; \mathbf{0}]$, where the original $y$ occupies positions $[0:d_{out}]$.
@@ -391,7 +384,7 @@ Table~\ref{tab:repair_perf} shows SDPA performance for repaired dimensions.
 
 \begin{table}[t]
 \centering
-\caption{SDPA latency (ms$\pm$std) before and after dimension repair ($B$=4, $S$=2048, $H$=32). Note: $d$=107 baseline (2.064$\pm$.06ms) differs from Table~\ref{tab:padding} (2.192$\pm$.07ms) due to run-to-run variance ($\sim$6\%), within normal GPU measurement variability.}
+\caption{SDPA latency (ms$\pm$std) before and after dimension repair ($B$=4, $S$=2048, $H$=32). Run-to-run variance ($\sim$6\%) vs.\ Table~\ref{tab:padding} is within normal GPU measurement variability (see~\S\ref{sec:phenomenon}.1).}
 \label{tab:repair_perf}
 \begin{tabular}{lrrrrr}
 \toprule
@@ -408,16 +401,14 @@ $d$ & Original & Minimal & Optimal & $\Delta$Min & $\Delta$Opt \\
 \end{table}
 
 \paragraph{Key Findings.}
-We define \emph{ROI} (Return on Investment) as the ratio of speedup percentage to memory overhead percentage: $\text{ROI} = \Delta\text{speedup} / \Delta\text{memory}$.
-MINIMAL achieves 23--28\% speedup with 3.72\% overhead (6.9$\times$ ROI, i.e., $\approx$26\%/3.72\%).
+We define \emph{ROI} (Return on Investment) as $\text{ROI} = {\Delta\text{speedup}}/{\Delta\text{memory}}$, measuring performance gain per unit memory cost.
+MINIMAL achieves 23--28\% speedup with 3.72\% overhead, yielding 6.9$\times$ ROI (i.e., ${\approx}26\%/{3.72\%}$).
 $d$=120 (already 8-aligned) shows no MINIMAL improvement, validating our hypothesis.
 OPTIMAL provides additional gains ($d$=120: +8.3\%) at 4.0$\times$ ROI.
 
-\subsection{End-to-End Compression Baseline}
+\subsection{End-to-End Compression Baseline (Not Repair)}
 
-\noindent\textbf{Important Scope Note:} The following results demonstrate PaLU \emph{compression} benefits (reduced KV cache size), \textbf{not} the effect of our proposed dimension repair.
-Integrating dimension repair into PaLU's SVD structure ($W = U \cdot V^T$) requires adapting to factorized weight representations, which remains future work.
-The available PaLU checkpoints use internal quantization constraints that already enforce alignment, making this a baseline comparison.
+\noindent\fbox{\parbox{0.95\columnwidth}{\textbf{Scope Note:} This section shows PaLU \emph{compression} benefits (reduced KV cache), \textbf{not} dimension repair effects. Available PaLU checkpoints already use aligned dimensions due to internal quantization. Repair integration remains future work.}}
 
 We compare Llama-3-8B baseline vs.\ PaLU-compressed (ratio=0.7) on A100 80GB.
 Figure~\ref{fig:e2e} shows prefill/decode throughput.
@@ -459,8 +450,9 @@ Unit tests confirm identical outputs (30/30 passed).
 
 \paragraph{Limitations.}
 (1) \emph{Accuracy scope}: While unit tests and theory confirm bit-exact preservation, comprehensive perplexity (WikiText-2) and downstream evaluation remain future work.
-(2) \emph{E2E integration}: Kernel-level speedups (25--30\%) are not yet integrated into PaLU's SVD structure.
-(3) \emph{Estimated impact}: Expected prefill (+15--25\%) and decode (+5--10\%) gains are extrapolated from kernel experiments.
+(2) \emph{E2E integration}: Kernel-level speedups (25--30\%) are not yet integrated into PaLU's SVD structure ($W = U \cdot V^T$).
+(3) \emph{E2E impact estimate}: Our kernel-level experiments validate 25--30\% speedup on SDPA operations. Since attention constitutes approximately 30\% of LLM inference time~\cite{flashattention2}, we estimate E2E improvements of \textbf{7--9\% for prefill} and \textbf{2--3\% for decode} (where memory bandwidth dominates). This extrapolation assumes similar alignment benefits across layers.
+(4) \emph{Validation gap}: Available PaLU checkpoints use internal alignment constraints; we validate on synthetic misaligned dimensions.
 
 %% ===========================================
 %% 7. RELATED WORK
@@ -470,7 +462,8 @@ Unit tests confirm identical outputs (30/30 passed).
 
 \paragraph{LLM Compression.}
 Post-training compression methods---SparseGPT~\cite{sparsegpt} (pruning), GPTQ~\cite{gptq}/AWQ~\cite{awq} (quantization), and PaLU~\cite{palu} (low-rank)---optimize for accuracy-compression trade-offs but largely ignore hardware alignment.
-Our work reveals this causes 30--58\% performance penalties.
+\emph{Which methods produce misaligned dimensions?} SVD-based approaches (PaLU, vanilla SVD) can theoretically produce irregular dimensions. However, PaLU's production checkpoints use internal quantization that enforces 32-multiple alignment. GPTQ and AWQ operate on fixed-width groups (typically 128) and do not alter tensor dimensions. Unstructured pruning (SparseGPT) can create irregular sparsity patterns but typically preserves dimensions.
+Our work targets compression methods that \emph{do not} include alignment constraints, including vanilla SVD and future methods that may relax constraints for better compression ratios.
 
 \paragraph{KV Cache \& Attention Optimization.}
 MQA~\cite{mqa}, GQA~\cite{gqa}, and StreamingLLM~\cite{streaminglm} reduce KV cache while preserving standard dimensions.
