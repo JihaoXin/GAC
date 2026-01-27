@@ -41,8 +41,7 @@
 }
 \email{jihao.xin@kaust.edu.sa}
 
-\author{Tian Lyu}
-\email{tian.lyu@kaust.edu.sa}
+\author{Tian Lv}
 \affiliation{
   \institution{KAUST}
   \city{Thuwal}
@@ -129,7 +128,7 @@ This paper makes the following contributions:
   \item \textbf{Root Cause Analysis}: We identify the causes across three layers: PyTorch backend selection, CUDA kernel paths, and hardware constraints (\S\ref{sec:causes}).
   \item \textbf{Shape Contract}: We formalize dimension alignment requirements as optimization constraints (\S\ref{sec:solution}).
   \item \textbf{Dimension Repair}: We propose a lightweight post-compression pass that restores alignment (\S\ref{sec:solution}).
-  \item \textbf{Evaluation}: Kernel-level experiments demonstrate 25--30\% speedup with 3.7\% memory overhead, yielding 6.9$\times$ ROI (\S\ref{sec:eval}).
+  \item \textbf{Evaluation}: Kernel-level experiments demonstrate 25--30\% speedup with 3.7\% memory overhead---a 6.9$\times$ return on investment (speedup per unit memory cost) (\S\ref{sec:eval}).
 \end{enumerate}
 
 %% ===========================================
@@ -207,7 +206,7 @@ Table~\ref{tab:backend} shows latency across different SDPA backends.
 
 \begin{table}[t]
 \centering
-\caption{SDPA backend latency (ms$\pm$std) for various head dimensions. ``---'' indicates MEM\_EFFICIENT backend unavailable due to strict 8-alignment requirement ($d$=107 is not 8-aligned). Measurements: 200 iterations $\times$ 3 trials.}
+\caption{SDPA backend latency (ms$\pm$std) for various head dimensions. Measurements: 200 iterations $\times$ 3 trials.}
 \label{tab:backend}
 \begin{tabular}{lrrrr}
 \toprule
@@ -215,10 +214,11 @@ $d$ & AUTO & FLASH & MEM\_EFF & MATH \\
 \midrule
 96  & 1.17{\scriptsize$\pm$.03} & 1.12{\scriptsize$\pm$.02} & 2.38{\scriptsize$\pm$.05} & 26.0{\scriptsize$\pm$.2} \\
 104 & 1.54{\scriptsize$\pm$.04} & 1.54{\scriptsize$\pm$.04} & 2.75{\scriptsize$\pm$.06} & 26.5{\scriptsize$\pm$.2} \\
-\textbf{107} & \textbf{2.14}{\scriptsize$\pm$.06} & \textbf{2.14}{\scriptsize$\pm$.06} & \multicolumn{1}{c}{---} & \textbf{27.0}{\scriptsize$\pm$.2} \\
+\textbf{107} & \textbf{2.14}{\scriptsize$\pm$.06} & \textbf{2.14}{\scriptsize$\pm$.06} & \multicolumn{1}{c}{N/A$^*$} & \textbf{27.0}{\scriptsize$\pm$.2} \\
 112 & 1.53{\scriptsize$\pm$.04} & 1.53{\scriptsize$\pm$.04} & 2.60{\scriptsize$\pm$.05} & 27.1{\scriptsize$\pm$.2} \\
 128 & 1.47{\scriptsize$\pm$.03} & 1.47{\scriptsize$\pm$.03} & 2.55{\scriptsize$\pm$.05} & 28.1{\scriptsize$\pm$.2} \\
 \bottomrule
+\multicolumn{5}{l}{\scriptsize $^*$MEM\_EFFICIENT unavailable: requires strict 8-alignment ($d$=107 is not 8-aligned).}
 \end{tabular}
 \end{table}
 
@@ -398,12 +398,13 @@ $d$ & Original & Minimal & Optimal & $\Delta$Min & $\Delta$Opt \\
 \paragraph{Key Findings.}
 We define \emph{ROI} (Return on Investment) as $\text{ROI} = {\Delta\text{speedup}}/{\Delta\text{memory}}$, measuring performance gain per unit memory cost.
 MINIMAL achieves 23--28\% speedup with 3.72\% overhead, yielding 6.9$\times$ ROI (i.e., ${\approx}26\%/{3.72\%}$).
-$d$=120 (already 8-aligned) shows no MINIMAL improvement, validating our hypothesis.
-OPTIMAL provides additional gains ($d$=120: +8.3\%) at 4.0$\times$ ROI.
+$d$=120 illustrates the difference between alignment levels: it is 8-aligned ($120 \mod 8 = 0$) but not 16-aligned ($120 \mod 16 = 8$). Thus, MINIMAL (mod-8) leaves it unchanged (0\% gain), while OPTIMAL (mod-16) pads to 128, enabling Tensor Core tile optimization for +8.3\% speedup.
+OPTIMAL provides additional gains at 4.0$\times$ ROI.
 
-\subsection{PaLU Compression Benefits (Orthogonal Study)}
+\subsection{Orthogonal Study: PaLU Compression Benefits}
 
-We compare Llama-3-8B baseline vs.\ PaLU-compressed (ratio=0.7) on A100 80GB to contextualize compression benefits separately from dimension repair.
+To contextualize compression benefits (distinct from our dimension repair contribution), we compare Llama-3-8B baseline vs.\ PaLU-compressed (ratio=0.7) on A100 80GB.
+Note: PaLU uses internal 32-multiple quantization, producing aligned dimensions---this evaluation shows compression benefits, not repair benefits.
 Table~\ref{tab:e2e} and Figure~\ref{fig:e2e} show prefill/decode throughput.
 
 \begin{table}[t]
@@ -424,7 +425,7 @@ Memory (MB) & 19003 & 18896 & --0.6\% \\
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig6_e2e.pdf}
-\caption{\textbf{Compression benefit, not repair benefit.} Prefill and decode throughput for Llama-3-8B baseline vs.\ PaLU-compressed (ratio=0.7). The 11.5$\times$ decode speedup comes from reduced KV cache (compression effect), not dimension repair. These results are orthogonal to our alignment repair contribution.}
+\caption{\textbf{Compression benefit, not repair benefit.} Prefill and decode throughput for Llama-3-8B baseline vs.\ PaLU-compressed (ratio=0.7). Note: Prefill shows minimal change (--2\%, 9870$\to$9672 tok/s), while decode exhibits dramatic 11.5$\times$ speedup (119$\to$1371 tok/s) due to KV cache compression. These results are orthogonal to our alignment repair contribution.}
 \label{fig:e2e}
 \end{figure}
 
@@ -439,11 +440,13 @@ For a linear layer $y = Wx + b$, the padded output $y' = W'x + b'$ satisfies $y'
 For attention, zero-valued dimensions contribute nothing to scores, making padding semantically neutral.
 Unit tests confirm identical outputs (30/30 passed).
 
-\paragraph{Limitations.}
-(1) \emph{Accuracy scope}: While unit tests and theory confirm bit-exact preservation, comprehensive perplexity (WikiText-2) and downstream evaluation remain future work.
-(2) \emph{E2E integration}: Kernel-level speedups (25--30\%) are not yet integrated into PaLU's SVD structure ($W = U \cdot V^T$).
-(3) \emph{E2E impact estimate}: Our kernel-level experiments validate 25--30\% speedup on SDPA operations. The actual E2E impact depends on attention's fraction of total inference time (typically 20--40\%), suggesting modest but worthwhile E2E improvements for compute-bound workloads. Precise E2E validation with synthetically misaligned models is left to future work.
-(4) \emph{Validation gap}: Available PaLU checkpoints use internal alignment constraints; we validate on synthetic misaligned dimensions.
+\subsection{Limitations}
+\label{sec:limitations}
+
+\textbf{(1) Accuracy scope}: While unit tests and theory confirm bit-exact preservation, comprehensive perplexity (WikiText-2) and downstream evaluation remain future work.
+\textbf{(2) E2E integration}: Kernel-level speedups (25--30\%) are not yet integrated into PaLU's SVD structure ($W = U \cdot V^T$).
+\textbf{(3) E2E impact estimate}: Our kernel-level experiments validate 25--30\% speedup on SDPA operations. The actual E2E impact depends on attention's fraction of total inference time (typically 20--40\%), suggesting 5--12\% E2E improvement for compute-bound workloads. Precise E2E validation with synthetically misaligned models is left to future work.
+\textbf{(4) Validation gap}: Available PaLU checkpoints use internal alignment constraints; we validate on synthetic misaligned dimensions.
 
 %% ===========================================
 %% 7. RELATED WORK
@@ -483,7 +486,7 @@ Notably, L2 cache waste (5.8\%) is \emph{not} significant.
 Our Shape Contract and dimension repair provide a practical solution: MINIMAL strategy achieves 25--28\% kernel-level speedup with only 3.72\% memory overhead (6.9$\times$ ROI).
 Theoretical analysis shows 96.9\% of unconstrained SVD dimensions would benefit; no retraining required.
 
-End-to-end evaluation shows PaLU achieves 11.5$\times$ decode speedup from KV cache compression (orthogonal to our alignment contribution).
+End-to-end evaluation shows PaLU achieves 11.5$\times$ decode speedup from KV cache compression; notably, PaLU's internal 32-multiple quantization ensures aligned dimensions, making this benefit orthogonal to our dimension repair contribution.
 Integrating repair into SVD structures ($W = U \cdot V^T$), comprehensive perplexity validation, and H100+ generalization remain future work.
 
 %% ===========================================

@@ -1,7 +1,7 @@
 # Paper Review: When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
 
 **Target Venue:** EuroMLSys (SIGPLAN format, 6 pages main content)
-**Review Date:** 2026-01-26
+**Review Date:** 2026-01-27
 **Reviewer:** Paper Reviewer Agent
 
 ---
@@ -384,4 +384,74 @@ Appropriate length. The 6.9× ROI metric is memorable. The "96.9% would benefit"
 ---
 
 *Reviewer: Paper Reviewer Agent*
-*Date: 2026-01-26*
+*Date: 2026-01-27*
+
+---
+
+## Additional Visual Observations (2026-01-27 Update)
+
+Based on careful re-examination of the PDF page images:
+
+### Specific Text/Number Observations
+
+**Page 1 (page_01.png):**
+- Title uses large font, approximately 14-16pt, clearly readable
+- Author affiliation "KAUST" and "HUMAIN AI" visible in smaller font (~9pt)
+- I notice author name "Tian Lvy" - this appears to be a **typo** (should likely be "Tian Lv" or "Tian Liu")
+- Figure 1 caption text "Dimension repair (padding to d=112) recovers 30% performance with only 4.7% memory overhead" - the numbers 30% and 4.7% are clearly visible
+
+**Page 2 (page_02.png):**
+- Figure 2 shows clear data points: at head_dim ~107 the latency peaks at approximately 2.1-2.2ms
+- The X-axis range shows values from approximately 70 to 130 head dimension
+- Y-axis shows latency from 0 to approximately 2.5ms
+- Shaded confidence intervals are visible but quite light (alpha ~0.2)
+- Figure 3 histogram shows dimension values: visible bars at 114, 116, 117, 118, 120, 121, 122, 123, 124, 125
+- The bar at d=120 should be highlighted differently (it's the only 8-aligned value)
+
+**Page 3 (page_03.png):**
+- Table 1 header row: "d | AUTO | FLASH | MEM_EFF | MATH"
+- Data row for d=107: "2.14±.06 | 2.14±.06 | --- | 27.0±.2"
+- The "---" for MEM_EFF clearly shows unavailability
+- Section header "4 Root Cause Analysis" is visible
+
+**Page 4 (page_04.png):**
+- Figure 4 shows horizontal bars with percentages
+- I can see "58%" for TC Alignment, "50%" for Vec. Loads, "40%" for SDPA BW, and "5.8%" for L2 Cache
+- The L2 Cache bar is notably shorter than the others
+- Table 2 shows the hypothesis testing results with "Confirmed" and "Not confirmed" status
+
+**Page 5 (page_05.png):**
+- Figure 5 scatter plot shows two series: blue circles (MINIMAL) and orange squares (OPTIMAL)
+- Data point labels visible: "d=107", "d=114", "d=117", "d=120", "d=121", "d=125"
+- The d=120 point appears at approximately (0%, 0%) confirming the validation case
+- Labels in upper-left region do appear crowded/overlapping
+- Table 5 shows latency values with clear improvement percentages (+27.8%, +24.4%, etc.)
+
+**Page 6 (page_06.png):**
+- Figure 6 bar chart clearly shows two groups: "Prefill" and "Decode"
+- Prefill bars: Baseline ~9870, PaLU ~9672 (nearly identical visually)
+- Decode bars: Baseline ~119, PaLU ~1371 (dramatic difference, labeled "11.5x")
+- The "11.5x" annotation is visible but relatively small
+- References section begins at bottom, I can see citations [1], [2], etc.
+- Total references appear to be approximately 21 items
+
+### Figure Quality Assessment Summary
+
+| Aspect | Rating | Notes |
+|--------|--------|-------|
+| Overall Layout | Good | Proper dual-column format, balanced content |
+| Figure Sizing | Good | Figures fit column width appropriately |
+| Font Readability | Needs Work | Some annotations <8pt |
+| Color Scheme | Good | Blue/orange provides good contrast |
+| Data Visualization | Good | Clear trends visible |
+| Label Clarity | Needs Work | Figure 5 labels overlap |
+| Print Readiness | Fair | Light shading may not reproduce well |
+
+### Actionable Visual Fixes (Prioritized)
+
+1. **CRITICAL - Figure 5 Labels**: Offset labels with leader lines to avoid overlap in the d=107/121/125 region
+2. **CRITICAL - Author Typo**: Fix "Tian Lvy" → correct spelling
+3. **HIGH - Figure 2 Confidence Band**: Increase alpha from ~0.2 to ~0.4 for better print visibility
+4. **HIGH - Figure 3 Bar Highlighting**: Use distinct color (e.g., green) for d=120 bar to show it's 8-aligned
+5. **MEDIUM - Figure 1 Text**: Increase annotation font from ~7pt to 8-9pt
+6. **MEDIUM - Figure 6**: Increase "11.5x" annotation font size
