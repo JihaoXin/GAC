@@ -113,6 +113,94 @@ searches:
       - "检查 vLLM 源码确认 head_dim fallback 行为"
       - "调研 TensorRT-LLM 的 dimension 处理策略"
 
+  # ===== 新增：vLLM/TensorRT-LLM 维度处理策略深度调研 =====
+  - date: "2026-01-27"
+    topic: "dimension_handling_production_frameworks"
+    query: "vLLM TensorRT-LLM dimension alignment handling strategies 2024-2025"
+    purpose: "回应 Reviewer 关于生产推理框架维度处理策略的问题"
+    findings:
+      - title: "vLLM FlashAttention Backend 维度约束"
+        source: "https://github.com/vllm-project/vllm/issues/3359"
+        relevance: "核心证据 - vLLM 严格限制 head_dim"
+        key_points:
+          - "FlashAttentionBackend 只支持 head sizes: [64, 80, 96, 112, 128, 256]"
+          - "XFormersBackend 也同样受限于这些维度"
+          - "不支持的维度会抛出 ValueError"
+          - "FlashAttention 库本身支持所有 head_dim <= 256，但 vLLM 的 PagedAttention 实现有额外限制"
+
+      - title: "vLLM 自动 Fallback 机制"
+        source: "https://github.com/vllm-project/vllm/issues/12656"
+        relevance: "说明生产框架如何处理不支持的维度"
+        key_points:
+          - "不支持的 head_size (如 72, 88) 会触发 fallback 到 XFormers backend"
+          - "日志信息: 'Cannot use FlashAttention-2 backend for head size X. Using XFormers backend.'"
+          - "Multimodal 模型的 ViT 部分常有非标准 head_dim (如 72)"
+          - "文本部分通常用标准 head_dim=128，可用 FlashAttention"
+          - "V1 engine 在某些情况下无法 fallback，会直接报错"
+
+      - title: "vLLM FlashAttention Backend 实现细节"
+        source: "https://docs.vllm.ai/en/latest/api/vllm/v1/attention/backends/flash_attn/"
+        relevance: "官方文档确认维度约束"
+        key_points:
+          - "head_size % 8 == 0 and head_size <= 256 是基本要求"
+          - "需要 Compute Capability >= 8.0 (Ampere+)"
+          - "只支持 float16 或 bfloat16"
+          - "Block size 必须是 16 的倍数"
+          - "KV cache shape: (2, num_blocks, block_size, num_kv_heads, head_size)"
+
+      - title: "TensorRT-LLM 支持的 Head Sizes"
+        source: "https://github.com/NVIDIA/TensorRT-LLM/discussions/1451"
+        relevance: "NVIDIA 官方确认支持的维度列表"
+        key_points:
+          - "Ampere (SM80, SM86), Ada (SM89), Hopper (SM90) 支持 head sizes: [32, 40, 64, 80, 96, 104, 128, 160, 256]"
+          - "0.9.0 版本扩展了支持的维度范围"
+          - "专门为 LLaMA-like 模型添加更多 head sizes"
+          - "不在列表中的维度行为未明确记录"
+
+      - title: "TensorRT-LLM CUDA Graph Padding 策略"
+        source: "https://nvidia.github.io/TensorRT-LLM/advanced/gpt-attention.html"
+        relevance: "TensorRT-LLM 的 batch size padding 策略 (非 head_dim padding)"
+        key_points:
+          - "CUDA Graph padding 用于 batch size 对齐，非 head_dim 对齐"
+          - "批大小不匹配时 padding 到最近的支持大小"
+          - "可实现 22% 端到端吞吐提升"
+          - "支持 Padded Mode 和 Packed Mode 两种序列处理方式"
+          - "Packed Mode 更高效，padded mode 可能被移除"
+
+      - title: "TensorRT-LLM Attention Kernel 选择"
+        source: "https://nvidia.github.io/TensorRT-LLM/advanced/gpt-attention.html"
+        relevance: "理解 TRT-LLM 如何选择 attention kernel"
+        key_points:
+          - "Context Phase: 短序列用 vanilla MHA，长序列用 Flash Attention"
+          - "Generation Phase: 在 XQA kernel 和 masked MHA kernel 间启发式选择"
+          - "可用 TRTLLM_FORCE_XQA=1 强制使用 XQA kernel"
+          - "支持的 head_dim 配置在 decoderXQARunner.h 中定义"
+
+      - title: "FlashAttention-2 vs XFormers 性能对比"
+        source: "https://arxiv.org/pdf/2307.08691"
+        relevance: "量化 fallback 的性能损失"
+        key_points:
+          - "FlashAttention-2 比 FlashAttention-1/xformers 快约 2x"
+          - "FlashAttention-2 比 PyTorch naive attention 快 9-10x"
+          - "FlashAttention-2 可达 A100 理论 FLOPs 的 50-73%"
+          - "Forward pass: FA2 比 xformers 快 1.3-1.5x"
+          - "Backward pass: FA2 比 xformers 快约 2x"
+
+      - title: "FlashInfer 作为替代后端"
+        source: "https://flashinfer.ai/2024/02/02/introduce-flashinfer.html"
+        relevance: "另一个重要的 attention 后端"
+        key_points:
+          - "标准测试配置: head_dim=128 (Llama2-7B 设置)"
+          - "PageAttention 性能一致优于 vLLM 0.2.6"
+          - "Grouped-Query Attention 在 A100/H100 上比 vLLM 快 2-3x"
+          - "FP8 decode kernel 比 FP16 快 2x"
+          - "GPU bandwidth utilization 接近 100%"
+    action_items:
+      - "在 Related Work 明确说明 vLLM/TensorRT-LLM 的维度约束"
+      - "对比我们的 GAC 方案与框架的 fallback 策略"
+      - "强调框架层面的维度对齐是 ad-hoc 的，缺乏系统性分析"
+      - "引用 FlashAttention-2 论文说明 fallback 性能损失"
+
   - date: "2026-01-27"
     topic: "technical_verification"
     query: "GPU GEMM padding irregular dimension performance"
@@ -267,12 +355,33 @@ technical_references:
 # 待调研的问题
 pending_questions:
   - question: "vLLM 如何处理不规则维度？"
-    status: "partially_answered"
-    answer: "FlashAttentionBackend 限制特定 head_dim，不支持的可能 fallback"
+    status: "answered"
+    answer: |
+      vLLM FlashAttentionBackend 严格限制 head_dim 为 [64, 80, 96, 112, 128, 256]。
+      不支持的维度会自动 fallback 到 XFormers backend (日志: "Cannot use FlashAttention-2
+      backend for head size X. Using XFormers backend.")。
+      基本要求: head_size % 8 == 0 且 head_size <= 256。
+      V1 engine 的 fallback 行为可能不如 V0 完善。
+    sources:
+      - "https://github.com/vllm-project/vllm/issues/3359"
+      - "https://github.com/vllm-project/vllm/issues/12656"
+      - "https://docs.vllm.ai/en/latest/api/vllm/v1/attention/backends/flash_attn/"
 
   - question: "TensorRT-LLM 的 padding 策略是什么？"
-    status: "pending"
-    note: "需要查看源码或官方文档"
+    status: "answered"
+    answer: |
+      TensorRT-LLM 有两类 padding 策略：
+      1. CUDA Graph Padding: 用于 batch size 对齐，将批大小 padding 到支持的大小
+         (如 [1, 2, 4, 8, 16, 32, 64, 128, ...])，可提升 22% 吞吐。
+      2. 序列 Padding: 支持 Padded Mode (填充到 max_seqlen) 和 Packed Mode (无填充)。
+
+      对于 head_dim：
+      - 支持的 head sizes: [32, 40, 64, 80, 96, 104, 128, 160, 256] (SM80+)
+      - 不支持的 head_dim 行为未明确记录（可能报错或性能下降）
+      - 没有发现显式的 head_dim padding 策略文档
+    sources:
+      - "https://github.com/NVIDIA/TensorRT-LLM/discussions/1451"
+      - "https://nvidia.github.io/TensorRT-LLM/advanced/gpt-attention.html"
 
   - question: "Palu 的 group_size=4 如何影响最终维度？"
     status: "pending"
@@ -299,6 +408,87 @@ key_findings:
   - finding: "量化方法不产生 dimensional collapse"
     evidence: "GPTQ, AWQ 保持原始维度结构"
     implication: "SVD compression 有独特的 dimensional collapse 问题"
+
+  # ===== 新增：生产推理框架维度处理发现 =====
+  - finding: "vLLM 使用 hard-coded 白名单限制支持的 head dimensions"
+    evidence: |
+      FlashAttentionBackend/XFormersBackend 只接受 [64, 80, 96, 112, 128, 256]。
+      不在列表中的维度会抛出 ValueError 或自动 fallback 到较慢后端。
+    implication: |
+      SVD 压缩产生的非标准 head_dim (如 107) 会触发 fallback，
+      导致性能下降 1.3-2x (FA2 vs xformers)。
+      这验证了我们论文的核心观点：维度对齐对生产系统至关重要。
+    sources:
+      - "https://github.com/vllm-project/vllm/issues/3359"
+      - "https://github.com/vllm-project/vllm/issues/12656"
+
+  - finding: "TensorRT-LLM 同样有明确的 head_dim 白名单"
+    evidence: |
+      支持的 head sizes: [32, 40, 64, 80, 96, 104, 128, 160, 256] (Ampere/Ada/Hopper)。
+      在 v0.9.0 版本扩展了支持范围，专门为 LLaMA-like 模型优化。
+      不支持的维度行为未明确记录。
+    implication: |
+      即使 NVIDIA 官方框架也需要维护特定维度列表。
+      说明维度对齐不是我们"发明"的问题，而是业界公认的挑战。
+    sources:
+      - "https://github.com/NVIDIA/TensorRT-LLM/discussions/1451"
+
+  - finding: "FlashAttention-2 比 fallback 后端快 1.3-2x"
+    evidence: |
+      FA2 forward pass 比 xformers/triton 快 1.3-1.5x。
+      FA2 backward pass 比 xformers 快约 2x。
+      FA2 可达 A100 理论 FLOPs 的 50-73%。
+    implication: |
+      当 SVD 压缩导致 fallback 时，性能损失是显著的。
+      这量化了 dimensional collapse 的实际影响。
+    sources:
+      - "https://arxiv.org/pdf/2307.08691 (FlashAttention-2 paper)"
+
+  - finding: "生产框架的维度处理是 ad-hoc 的，缺乏系统性分析"
+    evidence: |
+      vLLM: 维护硬编码白名单，fallback 行为依赖版本
+      TensorRT-LLM: 扩展支持范围但仍有限制，CUDA graph padding 只针对 batch size
+      FlashInfer: 主要在标准配置 (head_dim=128) 上测试
+    implication: |
+      现有框架没有系统性地解决 dimensional collapse 问题。
+      我们的 GAC 方案提供了第一个系统性的分析和修复策略。
+      Related Work 应强调这个研究空白。
+
+  - finding: "TensorRT-LLM 的 padding 主要针对 batch size，非 head_dim"
+    evidence: |
+      CUDA Graph padding: 批大小 padding 到支持大小 [1,2,4,8,16,32,...]
+      序列 padding: Padded Mode vs Packed Mode
+      未发现显式的 head_dim padding 或修复策略文档。
+    implication: |
+      即使 NVIDIA 的生产框架也没有公开的 head_dim 修复策略。
+      这进一步支持我们论文的新颖性：首次系统性研究维度修复。
+
+# Related Work 段落建议 (回应 Reviewer)
+related_work_suggestions:
+  vllm_tensorrt_comparison:
+    topic: "Dimension Handling in Production Inference Frameworks"
+    suggested_text: |
+      Production LLM inference frameworks like vLLM and TensorRT-LLM employ
+      dimension-aware attention backends with strict head dimension constraints.
+      vLLM's FlashAttentionBackend only supports head sizes in
+      {64, 80, 96, 112, 128, 256}, falling back to the slower XFormers backend
+      for unsupported dimensions (1.3-2× slowdown vs. FlashAttention-2).
+      TensorRT-LLM similarly restricts attention kernels to specific head sizes
+      {32, 40, 64, 80, 96, 104, 128, 160, 256} on modern GPUs (SM80+).
+      However, these frameworks apply ad-hoc white-listing without systematic
+      analysis of the performance implications of irregular dimensions.
+      Our work complements these practical constraints by: (1) providing the first
+      systematic characterization of dimensional collapse in compressed LLMs,
+      (2) quantifying the performance impact beyond simple fallback mechanisms,
+      and (3) proposing GAC dimension repair strategies that can be integrated
+      into compression pipelines to ensure compatibility with optimized backends.
+    key_citations:
+      - "vLLM: Efficient Memory Management for Large Language Model Serving (SOSP 2023)"
+      - "FlashAttention-2: Faster Attention with Better Parallelism (ICLR 2024)"
+    reviewer_concern_addressed: |
+      直接回应 Reviewer 关于 "lacks comparison with other dimension handling
+      strategies in production inference frameworks" 的问题。
+      说明我们的工作是对现有框架 ad-hoc 策略的系统性补充，而非重复。
 
 # 最后更新时间
 last_updated: "2026-01-27"

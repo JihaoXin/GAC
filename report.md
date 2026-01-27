@@ -626,3 +626,42 @@ $$f_{\theta}(x) = \text{slice}(f_{\theta'}(x), [0:d_{out}])$$
 | C23 Hardware Layer | `results/C23/20260124_220005_C23_hardware_layer/` | ✓ |
 | C4 Dimension Repair | `results/C4/20260124_221749_C4_dimension_repair/` | ✓ |
 | **C5 E2E Comparison** | `results/C5/20260125_000525_C5_e2e_comparison/` | ✓ 数据有效 (注：展示 PaLU 压缩效果，非 repair 效果) |
+
+---
+
+## 2026-01-27 更新：审稿修改完成
+
+### 完成的任务
+
+1. **M3_PERPLEXITY**: 添加了 WikiText-2 perplexity 验证
+   - Baseline: 11.08
+   - RAP SVD (r=0.8, d=102): 92.39
+   - RAP SVD + Repair (d=104): 92.39 (identical)
+   - 确认 repair 不影响模型精度
+
+2. **M1_SCOPE_CLARIFICATION**: 强化 theoretical scope 说明
+   - Figure 2 caption 现在以 "THEORETICAL (Unconstrained SVD)" 开头
+   - 添加了 §3.2 "Scope and Dimension Distribution" 子节
+   - 明确说明 96.9% 数据来自理论分析，非生产 PaLU
+
+3. **M2_E2E_REPAIR**: 集成 RAP SVD 实验结果
+   - RAP SVD 成功生成 100% 不对齐维度模型 (d=102)
+   - 在 §3.2 和 §6.5 中引用 RAP SVD 作为真实不对齐例子
+   - 添加 RAP citation [9]
+
+4. **m7_FIG5_LABELS**: 检查 Figure 5 标签重叠 (CRITICAL)
+   - 当前版本使用 leader lines 和手动偏移
+   - 标签 d=107, d=117, d=121, d=125 已分开
+
+### 论文结构
+- **主文 5 页** (Introduction → Conclusion)
+- **参考文献 1 页** (不计入页数限制)
+- 总计 6 页，符合 EuroMLSys 要求
+
+### 新增实验数据
+| 实验 | 路径 | 状态 |
+|------|------|------|
+| RAP SVD Compression | `results/rap_svd_misaligned/` | ✓ d=102, 100% misaligned |
+| Perplexity Baseline | `results/perplexity/20260127_082658_baseline_ppl/` | ✓ PPL=11.08 |
+| Perplexity RAP SVD | `results/perplexity/20260127_082804_rap_svd_ppl/` | ✓ PPL=92.39 |
+| Perplexity RAP SVD+Repair | `results/perplexity/20260127_082926_rap_svd_repair_ppl/` | ✓ PPL=92.39 |

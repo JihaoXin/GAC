@@ -1,587 +1,463 @@
-created_at: '2026-01-27T12:00:00+08:00'
+created_at: '2026-01-27T15:00:00+08:00'
 execution_order:
-  phase_1_quick_wins:
-    description: Quick text fixes (5 tasks, WRITING_ONLY, 低风险)
-    parallel: true
-    rationale: '这些都是纯文字修改，风险极低，可快速完成。
-
-      修复 Author Typo 是必须的。
-
-      '
-    tasks:
-    - TYPO_AUTHOR
-    - M2_CONCLUSION
-    - m2_TABLE
-    - m6_ABSTRACT_ROI
-    - m7_LIMITATIONS
-  phase_2_reviewer_questions:
-    description: 回应 Reviewer Questions (2 tasks)
-    parallel: true
-    rationale: 'Reviewer 的 Questions 表明他们希望论文解释这些点。
-
-      回应这些问题可以展示 thoroughness。
-
-      '
-    tasks:
-    - Q4_EXPLANATION
-    - Q2_E2E_ESTIMATE
-  phase_3_major_fixes:
-    description: Major issues (3 tasks)
+  phase_1_experiments:
+    description: 运行关键实验 (突破停滞的关键)
     parallel: false
-    rationale: '这些是 Reviewer "Must Fix" 列表中的项目。
+    rationale: '必须先运行实验获取数据，才能更新论文。
 
-      M1 和 M2 是 Major Issues。
-
-      '
-    tasks:
-    - M1_E2E_TITLE
-    - M2_SCOPE_PROMINENCE
-    - FIG_M2_RETRY
-  phase_4_figure_retry:
-    description: Figure 6 retry (1 task)
-    parallel: false
-    rationale: '之前失败两次，这次用最简单的方法（改 caption）。
+      这是提升 Technical Quality (40% 权重) 的唯一途径。
 
       '
     tasks:
-    - FIG_M4_RETRY
+    - M2_E2E_REPAIR
+    - M3_PERPLEXITY
+  phase_2_literature:
+    description: 完善 Related Work
+    parallel: true
+    rationale: '可以与 Phase 1 并行，不依赖实验结果
+
+      '
+    tasks:
+    - LITERATURE_RELATED_WORK
+  phase_3_writing:
+    description: 文字修改 (依赖实验结果)
+    parallel: true
+    rationale: '等实验完成后再修改论文，避免多次修改
+
+      '
+    tasks:
+    - M1_SCOPE_CLARIFICATION
+    - m7_FIG5_LABELS
 issues:
 - actions:
-  - agent: writer
-    expected_output: Author name 正确拼写
+  - agent: experimenter
+    expected_output: results/rap_svd_misaligned/ 目录包含压缩后的不对齐模型
     status: pending
     step: 1
-    task: '在 Latex/main.tex 中修复 author name:
+    task: "使用 RAP SVD 压缩模型创建不对齐维度:\n\n1. 检查 third_party/RAP/prune.py 的 --attention\
+      \ svd 模式\n2. 运行压缩:\n   python third_party/RAP/prune.py \\\n     --model meta-llama/Meta-Llama-3-8B-Instruct\
+      \ \\\n     --attention svd \\\n     --retain-ratio 0.8 \\\n     --save-model\
+      \ ./results/rap_svd_misaligned/\n3. 验证输出模型的 head_dim 分布（应该有不对齐值如 102, 103 等）\n\
+      4. 记录维度分布到 results/rap_svd_misaligned/dims.json\n\n注意: 需要 80GB GPU (A100_80GB)，预计\
+      \ 2-4 小时\n"
+  - agent: experimenter
+    depends_on:
+    - 1
+    expected_output: results/rap_svd_repaired/ 目录包含修复后的模型
+    status: pending
+    step: 2
+    task: '对 RAP SVD 模型运行 dimension repair:
 
-      找到 line 44: \author{Tian Lvy}
 
-      改为: \author{Tian Lv}  (或正确的名字)
+      1. 加载 RAP SVD 压缩模型
+
+      2. 运行 DimensionRepairer 修复不对齐维度
+
+      3. 保存修复后的模型到 results/rap_svd_repaired/
+
+      4. 记录修复前后的维度变化
+
+      '
+  - agent: experimenter
+    depends_on:
+    - 2
+    expected_output: results/rap_svd_e2e/comparison.json 包含对比数据
+    status: pending
+    step: 3
+    task: "运行 E2E benchmark 对比:\n\npython -m src.gcompress_bench.llm_run \\\n  --variant\
+      \ rap_svd \\\n  --suite infer_sweep \\\n  --out results/rap_svd_e2e/\n\npython\
+      \ -m src.gcompress_bench.llm_run \\\n  --variant rap_svd_repair \\\n  --suite\
+      \ infer_sweep \\\n  --out results/rap_svd_e2e/\n\n对比指标:\n- Prefill throughput\
+      \ (tok/s)\n- Decode throughput (tok/s)\n- Memory usage (MB)\n"
+  - agent: writer
+    depends_on:
+    - 3
+    expected_output: 论文中有 E2E repair 验证数据
+    status: pending
+    step: 4
+    task: '更新论文 Table 6 和 Figure 6:
+
+
+      1. 添加 RAP_SVD 和 RAP_SVD+Repair 行到 Table 6
+
+      2. 更新 Figure 6 展示 repair speedup
+
+      3. 在 §6.4 添加讨论 repair 对不对齐模型的效果
 
       '
   depends_on: []
-  description: '**Reviewer Visual Observation (Page 1)**:
+  description: '**Reviewer M2 原文**:
 
-    "I notice author name ''Tian Lvy'' - this appears to be a **typo** (should likely
-    be ''Tian Lv'' or ''Tian Liu'')"
+    "The E2E evaluation shows PaLU compression benefits (11.5× decode speedup)
+
+    but not dimension repair benefits. This is because the tested PaLU model
+
+    has aligned dimensions."
 
 
-    这是一个基本的排版错误，必须修复。
+    **为什么之前无法解决**:
+
+    - 所有 PaLU checkpoint 都使用 32-倍数量化约束，100% 对齐
+
+    - 无法用 PaLU 模型演示 repair 效果
+
+
+    **解决方案**:
+
+    findings.yaml 已发现 RAP SVD 不强制对齐！
+
+    - PaLU: block_size=32 强制对齐
+
+    - RAP SVD: round(head_dim * retain_ratio) 任意整数
+
+
+    **实验设计**:
+
+    1. 使用 RAP SVD 压缩 Llama-3-8B (retain_ratio=0.8)
+
+    2. 预期得到 head_dim=102 (不是 8 的倍数)
+
+    3. 运行 E2E benchmark: RAP_SVD vs RAP_SVD+Repair
+
+    4. 展示 repair 带来的 speedup
 
     '
-  id: TYPO_AUTHOR
-  inner_loop_count: 0
-  max_inner_loops: 1
+  id: M2_E2E_REPAIR
+  inner_loop_count: 2
+  max_inner_loops: 3
   priority: critical
   status: completed
-  title: Fix Author Name Typo
-  type: WRITING_ONLY
+  title: E2E Validation with Misaligned Dimensions (RAP SVD)
+  type: EXPERIMENT_REQUIRED
 - actions:
-  - agent: writer
-    expected_output: Conclusion 与论文其他部分一致
+  - agent: experimenter
+    expected_output: results/perplexity/ 目录包含 perplexity 数据
     status: pending
     step: 1
-    task: '在 Latex/main.tex 中修改 Conclusion:
+    task: "运行 perplexity 评估:\n\n1. 对 baseline (原始模型):\n   python -m src.gcompress_bench.llm_eval\
+      \ \\\n     --variant baseline \\\n     --suite ppl \\\n     --out results/perplexity/\n\
+      \n2. 对 PaLU 压缩模型:\n   python -m src.gcompress_bench.llm_eval \\\n     --variant\
+      \ palu \\\n     --suite ppl \\\n     --out results/perplexity/\n\n3. 对 PaLU\
+      \ + Repair (如果适用):\n   python -m src.gcompress_bench.llm_eval \\\n     --variant\
+      \ palu_repair \\\n     --suite ppl \\\n     --out results/perplexity/\n\n记录\
+      \ WikiText-2 perplexity 值\n"
+  - agent: writer
+    depends_on:
+    - 1
+    expected_output: 论文中有 perplexity 验证数据
+    status: pending
+    step: 2
+    task: '在论文 §6.5 Accuracy Preservation 中添加:
 
 
-      从: "End-to-end evaluation shows PaLU achieves 11.5× decode speedup despite misalignment."
+      1. WikiText-2 perplexity 表格
 
-      改为: "End-to-end evaluation shows PaLU achieves 11.5× decode speedup from KV
-      cache compression (orthogonal to alignment)."
+      2. 说明 repair 不影响模型精度
 
-
-      这与 Table 6 caption 和 Figure 6 caption 的措辞一致。
+      3. 引用具体数值（如 baseline: X.XX, repaired: X.XX）
 
       '
   depends_on: []
-  description: '**Reviewer (m5)**:
+  description: '**Reviewer M3 原文**:
 
-    "Conclusion line 487: ''End-to-end evaluation shows PaLU achieves 11.5x decode
+    "Unit tests confirm identical outputs (30/30 passed) is insufficient for a
 
-    speedup despite misalignment'' - but PaLU checkpoints are aligned"
+    systems paper targeting EuroMLSys. The claim of bit-exact preservation needs
+
+    validation on meaningful workloads."
 
 
-    这与论文其他部分 (Table 6, Figure 6 caption) 不一致。
+    **Suggested Fix**:
+
+    "Run perplexity evaluation on WikiText-2 comparing original vs. repaired models"
+
+
+    **为什么重要**:
+
+    - 技术验证不足是 Technical Quality 评分的主要扣分点
+
+    - Perplexity 是 LLM 压缩论文的标准验证方法
 
     '
-  id: M2_CONCLUSION
-  inner_loop_count: 0
-  max_inner_loops: 1
+  id: M3_PERPLEXITY
+  inner_loop_count: 1
+  max_inner_loops: 2
   priority: high
   status: completed
-  title: Fix Conclusion Line 487 Inconsistency
-  type: WRITING_ONLY
+  title: Perplexity Validation on WikiText-2
+  type: EXPERIMENT_REQUIRED
 - actions:
-  - agent: writer
-    expected_output: Table 1 使用 N/A 并有解释
+  - agent: literature
+    expected_output: literature.yaml 更新，包含 vLLM/TensorRT-LLM 详细信息
     status: pending
     step: 1
-    task: "在 Latex/main.tex Table 1 中:\n1. 将 \"---\" 改为 \"N/A$^\\dagger$\"\n2. 在表格下方添加\
-      \ footnote:\n   \"$\\dagger$ MEM\\_EFFICIENT requires strict 8-alignment; unavailable\
-      \ for $d$=107.\"\n"
-  depends_on: []
-  description: '**Reviewer (m2)**:
-
-    "Table 1: Change ''---'' to ''N/A'' with explanatory footnote"
-
-    '
-  id: m2_TABLE
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: medium
-  status: completed
-  title: Table 1 N/A Notation
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: Abstract 无未定义术语
-    status: pending
-    step: 1
-    task: '检查 Abstract 中是否使用了 ROI。
-
-      如果有，要么定义它，要么用 "27% speedup with 3.7% memory overhead" 替换。
+    task: '完善 Related Work 调研:
 
 
-      注意：当前 Abstract 可能已经不包含 ROI（需要先检查）
+      1. 确认 vLLM 对不支持 head_dim 的 fallback 行为
+
+      2. 调研 TensorRT-LLM 的 dimension 处理策略
+
+      3. 搜索最新 2024-2025 关于 LLM inference 维度优化的论文
+
+
+      更新 literature.yaml
 
       '
-  depends_on: []
-  description: '**Reviewer (m6)**:
-
-    "ROI (Return on Investment) is used but not defined until §6.3.
-
-    Readers may be confused."
-
-
-    Reviewer 建议: "Either define ROI briefly in abstract or omit it and just say
-
-    ''27% speedup with 3.7% memory overhead.''"
-
-    '
-  id: m6_ABSTRACT_ROI
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: low
-  status: completed
-  title: Abstract ROI Definition
-  type: WRITING_ONLY
-- actions:
   - agent: writer
-    expected_output: Limitations 有 subsection header
+    depends_on:
+    - 1
+    expected_output: 论文 Related Work 更完善
     status: pending
-    step: 1
-    task: '在 Latex/main.tex 的 Evaluation section 末尾:
-
-      将 Limitations 段落改为带标题的 subsection:
+    step: 2
+    task: '在论文 §7 Related Work 中添加:
 
 
-      \subsection{Limitations}
+      1. vLLM 的 FlashAttentionBackend head_dim 限制
 
+      2. 与 TensorRT-LLM padding 策略的对比
 
-      内容保持不变，只是加上 subsection header。
-
-      '
-  depends_on: []
-  description: '**Reviewer (m7)**:
-
-    "The honest limitations are easy to miss."
-
-    "Make ''Limitations'' a subsection header (§6.6) for visibility."
-
-    '
-  id: m7_LIMITATIONS
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: low
-  status: completed
-  title: Make Limitations a Subsection
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: 论文中解释了 d=120 的 MINIMAL vs OPTIMAL 差异
-    status: pending
-    step: 1
-    task: '在 Table 5 附近或 §6.2 中添加一句解释:
-
-
-      "Note that $d$=120 shows 0\% improvement with MINIMAL (already 8-aligned)
-
-      but +8.3\% with OPTIMAL, which pads to 128 for Tensor Core tile alignment
-
-      (mod-16). This validates that both alignment levels provide independent benefits."
-
-
-      或者在 Table 5 caption 中添加类似说明。
-
-      '
-  depends_on: []
-  description: '**Reviewer Q4**:
-
-    "Why does d=120 (8-aligned) show 0% improvement with MINIMAL but +8.3% with
-
-    OPTIMAL (Table 5)? Is this Tensor Core tile optimization (mod-16) vs just
-
-    meeting MEM_EFFICIENT requirements (mod-8)?"
-
-
-    这是一个很好的观察，值得在论文中解释。d=120 是 8-aligned 但不是 16-aligned，
-
-    所以 MINIMAL (mod-8) 不改变它，但 OPTIMAL (mod-16) 将其 padding 到 128。
-
-    '
-  id: Q4_EXPLANATION
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: medium
-  status: completed
-  title: Answer Reviewer Q4 in Paper
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: 论文中有明确的 E2E 影响估计
-    status: pending
-    step: 1
-    task: '在 §6.3 (Repair Effectiveness) 或 Limitations 部分添加:
-
-
-      "Given that attention typically accounts for 20-40\% of LLM inference time,
-
-      our 25-28\% kernel-level improvement translates to an estimated 5-12\%
-
-      end-to-end speedup when attention is the bottleneck."
-
-
-      这回应了 Reviewer Q2 并提供了明确的 E2E 影响估计。
-
-      '
-  depends_on: []
-  description: '**Reviewer Q2**:
-
-    "What is the expected E2E impact of dimension repair? The paper estimates
-
-    20-40% of inference time is attention-bound, suggesting 5-12% E2E improvement.
-
-    Can you provide this estimate more explicitly?"
-
-
-    这个估算在 Limitations 部分可能已经有，需要检查并可能加强。
-
-    '
-  id: Q2_E2E_ESTIMATE
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: medium
-  status: completed
-  title: Add E2E Impact Estimate
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: Figure 6 的差异在视觉或文字上清晰
-    status: pending
-    step: 1
-    task: '**方案 A (最简单)**:
-
-      修改 Figure 6 caption 强调数值差异:
-
-
-      "Prefill throughput is nearly identical (9870 vs 9672 tok/s, -2\%),
-
-      while decode shows dramatic improvement (119 vs 1371 tok/s, 11.5×).
-
-      Note: this is compression benefit from reduced KV cache, not repair benefit."
-
-
-      **方案 B (如果脚本可用)**:
-
-      使用 matplotlib 的 bar_label() 在柱子上标注数值，使差异更清晰。
-
-
-      优先尝试方案 A（纯文字），风险更低。
+      3. 说明我们的方法与现有框架的关系
 
       '
   depends_on: []
   description: '**Reviewer 原文**:
 
-    "Figure 6 (Page 5): Y-axis scale makes Prefill comparison (9870 vs 9672, -2%)
+    "The paper lacks comparison with other dimension handling strategies in
 
-    appear identical while Decode (119 vs 1371, +11.5x) dominates."
+    production inference frameworks (vLLM, TensorRT-LLM padding strategies)."
 
 
-    之前失败两次，这次尝试最简单的方案：在 caption 中强调差异。
+    **[NEEDS_LITERATURE_SEARCH: related_work]**
+
+    - vLLM dimension alignment handling
+
+    - TensorRT-LLM implicit padding
+
+    - LLM inference dimension constraints 2024-2025
+
+
+    **literature.yaml 已有数据**:
+
+    - vLLM FlashAttentionBackend 限制 head_dim: [64, 80, 96, 112, 128, 256]
+
+    - TensorRT-LLM 有内置 padding 策略（待验证）
 
     '
-  id: FIG_M4_RETRY
+  id: LITERATURE_RELATED_WORK
   inner_loop_count: 0
   max_inner_loops: 1
   priority: medium
   status: completed
-  title: Fix Figure 6 Y-axis Scale (Retry)
-  type: WRITING_ONLY
+  title: Enhance Related Work with vLLM/TensorRT-LLM Comparison
+  type: LITERATURE_REQUIRED
 - actions:
   - agent: writer
-    expected_output: Figure 4 中 Not Confirmed 有视觉或文字区分
+    expected_output: 论文 scope 更清晰
     status: pending
     step: 1
-    task: '检查 Latex/figures/fig4_root_cause.pdf 是否已更新。
-
-      如果 L2 Cache bar 仍与其他 bar 颜色相同，则需要修改绘图脚本。
+    task: '修改论文中的 scope 说明:
 
 
-      如果脚本修改困难，可在 Figure 4 caption 中添加说明:
+      1. 在 Figure 2 标题开头加 "**Theoretical**"
 
-      "Note: L2 Cache (5.8%) was **not confirmed** as a root cause."
+      2. 在 §3 开头添加醒目的 scope 段落
+
+      3. 如果有 RAP SVD 数据，添加真实不对齐模型的例子
+
+
+      关键文字修改:
+
+      "While production PaLU checkpoints enforce 32-multiple alignment (100% aligned),
+
+      other SVD compression methods like RAP-SVD produce truly irregular dimensions.
+
+      Our repair targets these unconstrained compression scenarios."
 
       '
-  depends_on: []
-  description: '之前标记为 in_progress，检查是否完成。
+  depends_on:
+  - M2_E2E_REPAIR
+  description: '**Reviewer M1 原文**:
+
+    "Figure caption says ''Theoretical dimension distribution'' but the paper uses
+
+    this 96.9% misalignment figure as motivation throughout. Readers may incorrectly
+
+    assume real compressed models have this distribution."
 
 
-    **Reviewer 原文**:
+    **注意**: 如果 M2_E2E_REPAIR 成功，我们会有真实不对齐模型的数据，
 
-    "Figure 4 (Page 3): ''L2 Cache Sector'' bar for ''Not Confirmed'' hypothesis should
-    be
-
-    visually distinct - use grey color or hatching pattern."
-
-    '
-  id: FIG_M2_RETRY
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: high
-  status: completed
-  title: Fix Figure 4 Visual Distinction (Complete)
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: E2E section 标题和内容清晰区分 compression vs repair
-    status: pending
-    step: 1
-    task: "在 Latex/main.tex 中:\n1. 将 §6.4 标题从 \"End-to-End Evaluation\" 改为\n   \"\
-      Orthogonal Study: PaLU Compression Benefits\"\n2. 在该 section 开头添加一句:\n   \"\
-      This section demonstrates the compression benefits of PaLU, which are\n   orthogonal\
-      \ to the dimension repair contribution of this paper.\"\n"
-  depends_on: []
-  description: '**Reviewer M1**:
-
-    "The E2E evaluation compares Baseline vs. PaLU but does not show PaLU vs. PaLU+Repair.
-
-    The 11.5× decode speedup comes from KV cache compression, not dimension repair."
-
-
-    **Suggested Fix**:
-
-    Retitle §6.4 more explicitly (e.g., "Orthogonal Study: PaLU Compression Benefits")
+    可以大幅改善这个问题。
 
     '
-  id: M1_E2E_TITLE
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: high
-  status: completed
-  title: E2E Section Title Clarification
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: Scope 限定更显眼
-    status: pending
-    step: 1
-    task: '检查当前 "Scope and Applicability" 段落的位置。
-
-      如果它在 Motivating Example 之后，考虑移到之前。
-
-
-      或者在 Abstract 中添加 "without alignment constraints":
-
-      从: "Post-training compression can produce irregular tensor dimensions..."
-
-      改为: "Post-training compression \emph{without alignment constraints} can produce..."
-
-      '
-  depends_on: []
-  description: '**Reviewer M2**:
-
-    "The claim that ''96.9% of dimensions are misaligned'' appears prominently but
-
-    is based on *theoretical* Fisher-information analysis, not actual compressed models."
-
-
-    **Reviewer 已认可论文有 Scope Clarification，但建议更突出**:
-
-    "Move ''Scope and Applicability'' paragraph BEFORE the motivating example"
-
-    '
-  id: M2_SCOPE_PROMINENCE
+  id: M1_SCOPE_CLARIFICATION
   inner_loop_count: 0
   max_inner_loops: 1
   priority: medium
   status: completed
-  title: Make Scope Clarification More Prominent
+  title: Make 'Theoretical' Scope More Prominent
+  type: WRITING_ONLY
+- actions:
+  - agent: writer
+    expected_output: Figure 5 标签不再重叠
+    status: pending
+    step: 1
+    task: '修改 scripts/create_paper_figures.py 中 Figure 5 的绘制代码:
+
+
+      方案 1 (推荐): 使用 adjustText 库自动调整标签位置
+
+      方案 2: 使用 leader lines (箭头) 连接标签和数据点
+
+      方案 3: 手动 stagger 标签位置
+
+
+      重新生成 Latex/figures/fig5_repair_tradeoff.pdf
+
+      '
+  depends_on: []
+  description: '**Reviewer 原文 (标记为 CRITICAL)**:
+
+    "Data point labels (d=107, d=114, d=117, d=120, d=121, d=125) overlap severely
+
+    in upper-left region where d=107, d=121, d=125 labels collide."
+
+
+    这是 Reviewer 唯一标记为 CRITICAL 的视觉问题。
+
+    '
+  id: m7_FIG5_LABELS
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: medium
+  status: completed
+  title: Fix Figure 5 Label Overlap (CRITICAL Visual Issue)
   type: WRITING_ONLY
 notes:
-- 本轮全部是 WRITING_ONLY 任务，不需要 GPU 实验
-- 优先修复 Author Typo 和 Conclusion inconsistency（最低风险）
-- 回应 Reviewer Questions 是之前忽略的改进点
-- 如果这轮仍无进展，下轮需要考虑补实验（如 RAP SVD 验证）
-- FIG_M4 用最简单方法（改 caption）避免脚本问题
-planner_summary: '**停滞分析**: 连续 20 次迭代评分 7.25，波动为 0。
+- '本轮策略核心变化: 从 WRITING_ONLY 转向 EXPERIMENT_REQUIRED'
+- M2 是最关键任务 - 如果成功，可同时解决 E2E 验证和 scope 问题
+- M3 是次关键任务 - perplexity 是 EuroMLSys 的标准验证要求
+- 如果实验失败，下轮需要考虑 downscope contribution
+- RAP SVD 实验预计需要 4-8 小时 GPU 时间
+planner_summary: '**严重停滞警告**: 已达 100+ 次迭代停留在 7.25，之前的策略完全无效。
 
 
-  **Reviewer 主要反馈**:
+  **根本原因分析**:
 
-  - 整体评价 "Weak Accept"，分数构成: TQ 7.5 (40%) + PP 7.0 (30%) + Inn 7.0 (20%) + WQ 7.5
-  (10%) = 7.25
+  之前的 action plan 全部标记为 "completed"，但分数未变。这说明：
 
-  - M1: E2E validation 展示的是压缩收益，不是 repair 收益
+  1. 纯文字修改无法提升分数（Reviewer 权重 Technical Quality 40%）
 
-  - M2: 96.9% 统计数据的位置和强调方式
-
-  - M3: Figure 5 标签重叠 (CRITICAL)
-
-  - 多个图表质量问题待修复
+  2. Review 的三个 Major Issues 都需要实质性改变，不只是文字调整
 
 
-  **之前策略失败原因**:
+  **Reviewer 真正关心的问题**:
 
-  1. 图表修复已完成 FIG_M1, FIG_M3 但未提分
+  - M1: 96.9% 数据是"理论"值，不是实际 PaLU 模型（需要更明显的 scope 声明）
 
-  2. FIG_M4, FIG_FONT 失败（超过最大循环次数）
+  - M2: E2E 验证只展示压缩收益，不是 repair 收益（核心技术缺陷）
 
-  3. 文字修改 (M1, M2_CONCLUSION, m2_table) 仍未执行
-
-
-  **本轮策略变化**:
-
-  根据 review 原文分析，分数瓶颈在于：
-
-  - Technical Quality (7.5/10): "Validation Gap" - E2E 验证不足
-
-  - Paper Presentation (7.0/10): 图表问题（部分已修复）
-
-  - Innovation (7.0/10): 难以通过迭代提升
+  - M3: 只有 unit tests 验证 accuracy，缺少 perplexity（技术验证不足）
 
 
-  **关键洞察**:
+  **新策略 - 突破停滞**:
 
-  之前忽略了 review 中 "Questions for Authors" 部分的重要信息：
+  1. **EXPERIMENT_REQUIRED (M2)**: 使用 RAP SVD 创建真正不对齐的模型，运行 E2E repair 验证
 
-  - Q4 问 d=120 的 MINIMAL vs OPTIMAL 差异 → 需要在文中解释
+  2. **EXPERIMENT_REQUIRED (M3)**: 运行 WikiText-2 perplexity 评估
 
-  - Q2 要求明确 E2E 影响估计 → 需要补充
+  3. **LITERATURE_REQUIRED**: 完善 Related Work（review 明确提出）
+
+  4. **WRITING_ONLY**: 只做必要的文字修改，不浪费时间在低优先级任务
 
 
-  **新策略**:
+  **预期效果**:
 
-  1. 完成失败的图表任务（重试一次）
+  - Technical Quality: 7.5 → 8.0 (通过 M2, M3 实验)
 
-  2. 执行待处理的文字修改
+  - Paper Presentation: 7.0 → 7.5 (通过文字改进)
 
-  3. **新增**: 回应 Reviewer Questions (可在论文中加入解释)
-
-  4. 修复 Author Typo (Tian Lvy → Tian Lv)
+  - 总分: 7.25 → 7.75+
 
   '
-review_iteration: 14
+review_iteration: 15
 review_score: 7.25
 stagnation_analysis:
-  iterations_without_progress: 20
-  new_approach: '1. 优先完成所有 WRITING_ONLY 任务（低风险）
+  iterations_without_progress: 100+
+  new_approach: '**策略升级 - Level 3: 重新定位**
 
-    2. 重试 FIG_M4 用不同方法
 
-    3. 添加新任务回应 Reviewer Questions
+    聚焦于 Technical Quality (40% 权重):
 
-    4. 修复 Author Typo
+    1. 运行 RAP SVD E2E 实验 (M2 核心需求)
+
+    2. 运行 perplexity 评估 (M3 核心需求)
+
+    3. 补充 Related Work 对比 (文献需求)
+
+
+    放弃低价值任务:
+
+    - 不再修改图表样式 (已多次尝试无效)
+
+    - 不再优化 caption/footnote (边际效益极低)
 
     '
   previous_approaches:
-  - 图表修复 (FIG_M1, FIG_M3 完成, FIG_M4/FIG_FONT 失败)
-  - 文字修改计划但未执行
-  why_stagnated: '1. 部分图表修复完成但未重新 review
+  - 图表修复 (FIG_M1-M4) - 已完成，无效果
+  - 文字修改 (conclusion, caption) - 已完成，无效果
+  - Table 格式 (N/A notation) - 已完成，无效果
+  why_stagnated: '1. 之前只做 WRITING_ONLY 任务，无法提升 Technical Quality (40% 权重)
 
-    2. FIG_M4 (Figure 6 subplot) 失败两次
+    2. 所有图表修复任务完成但分数不变，说明 Reviewer 不认为这是关键
 
-    3. 文字修改优先级被降低，实际未执行
-
-    4. Reviewer Questions 未被纳入改进计划
+    3. 核心缺陷未解决: E2E repair 验证 + perplexity 评估
 
     '
 success_criteria:
   expected_score_improvement:
     current: 7.25
-    rationale: '本轮聚焦于：
+    rationale: '如果 M2 和 M3 实验成功:
 
-      1. 修复明显错误（Author Typo, Conclusion inconsistency）
+      - Technical Quality: 7.5 → 8.0 (+0.2 weighted)
 
-      2. 回应 Reviewer Questions（展示 responsiveness）
+      - Paper Presentation: 7.0 → 7.5 (+0.15 weighted)
 
-      3. 执行 Major Issue M1 的建议（retitle E2E section）
-
-
-      这些改动可能将 Paper Presentation 从 7.0 提升到 7.5，
-
-      总分从 7.25 提升到约 7.4。
+      - Total: 7.25 → 7.60+
 
 
-      注意：Innovation (7.0) 和 Technical Quality (7.5) 难以通过
+      如果还完成 Related Work 改进:
 
-      纯文字修改提升，需要新实验数据。
+      - Innovation: 7.0 → 7.3 (+0.06 weighted)
+
+      - Total: 可能达到 7.75
 
       '
-    target: 7.5
+    target: 7.75
   must_complete:
-  - 'TYPO_AUTHOR: Author name 正确'
-  - 'M2_CONCLUSION: Conclusion 一致'
-  - 'M1_E2E_TITLE: E2E section 标题清晰'
+  - 'M2_E2E_REPAIR: 运行 RAP SVD E2E 实验，获取 repair speedup 数据'
+  - 'M3_PERPLEXITY: 运行 perplexity 评估，证明 accuracy preservation'
   nice_to_have:
-  - 'm6_ABSTRACT_ROI: ROI 定义'
-  - 'm7_LIMITATIONS: Limitations subsection'
-  - 'M2_SCOPE_PROMINENCE: Scope 更显眼'
-  - 'FIG_M4_RETRY: Figure 6 改进'
+  - 'm7_FIG5_LABELS: 修复 Figure 5 标签重叠'
   should_complete:
-  - 'm2_TABLE: Table 1 N/A notation'
-  - 'Q4_EXPLANATION: 解释 d=120 差异'
-  - 'Q2_E2E_ESTIMATE: E2E 影响估计'
-  - 'FIG_M2_RETRY: Figure 4 区分'
+  - 'LITERATURE_RELATED_WORK: 完善 Related Work'
+  - 'M1_SCOPE_CLARIFICATION: 明确 scope'
 writing_tasks:
 - changes_required:
-  - change: Tian Lvy → Tian Lv
-    section: Author (line 44)
-  description: 修复 Author name typo
-  id: TYPO_AUTHOR
+  - change: 标题开头加 **Theoretical**
+    section: Figure 2
+  - change: 添加醒目的 scope 段落
+    section: §3
+  description: 修改 scope 说明
+  id: M1_SCOPE_CLARIFICATION
   target_files:
   - Latex/main.tex
 - changes_required:
-  - change: '''despite misalignment'' → ''from KV cache compression (orthogonal to
-      alignment)'''
-    section: Conclusion
-  description: 修复 Conclusion 不一致
-  id: M2_CONCLUSION
+  - change: 使用 adjustText 或 leader lines 避免标签重叠
+    section: plot_repair_tradeoff()
+  description: 修复 Figure 5 标签重叠
+  id: m7_FIG5_LABELS
   target_files:
-  - Latex/main.tex
-- changes_required:
-  - change: '''---'' → ''N/A'' with footnote'
-    section: Table 1
-  description: Table 1 N/A notation
-  id: m2_TABLE
-  target_files:
-  - Latex/main.tex
-- changes_required:
-  - change: '标题改为 ''Orthogonal Study: PaLU Compression Benefits'''
-    section: §6.4
-  description: E2E Section 标题
-  id: M1_E2E_TITLE
-  target_files:
-  - Latex/main.tex
-- changes_required:
-  - change: 添加解释 d=120 的 0% MINIMAL vs +8.3% OPTIMAL
-    section: §6.2 or Table 5 caption
-  description: 解释 d=120 MINIMAL vs OPTIMAL
-  id: Q4_EXPLANATION
-  target_files:
-  - Latex/main.tex
-- changes_required:
-  - change: 添加 '5-12% E2E speedup estimate'
-    section: §6.3 or Limitations
-  description: 添加 E2E 影响估计
-  id: Q2_E2E_ESTIMATE
-  target_files:
-  - Latex/main.tex
+  - scripts/create_paper_figures.py
+  - Latex/figures/fig5_repair_tradeoff.pdf

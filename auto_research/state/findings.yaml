@@ -374,9 +374,46 @@ C5_validation:
         description: |
           修复上述问题后，使用正确的维度分析和 repair 逻辑重新验证
 
+  - id: "F5.5"
+    date: "2026-01-27"
+    experiment: "M2_E2E_RAP_SVD_Compression (Job 18533)"
+    finding: "RAP SVD 压缩成功生成 100% 不对齐维度的 Llama-3-8B 模型"
+    status: "COMPLETED"
+    evidence_path: "results/rap_svd_misaligned/"
+    confidence: "high"
+    details:
+      job_id: 18533
+      model_path: "results/rap_svd_misaligned/llama3_8b_svd_r0.8.pt"
+      model_size_gb: 15.2
+      dims_json_path: "results/rap_svd_misaligned/dims.json"
+      compression_method: "RAP SVD (no alignment constraint)"
+      retain_ratio: 0.8
+      original_head_dim: 128
+      compressed_head_dim: 102
+      alignment_check: "102 % 8 = 6 (NOT aligned)"
+      total_layers: 32
+      k_aligned_8_count: 0
+      k_aligned_8_pct: 0.0
+      k_misaligned_8_pct: 100.0
+      unique_k_ranks: [102]
+      unique_v_ranks: [102]
+    code_analysis:
+      rap_svd_formula: "rank_per_head = round(head_dim * retain_ratio)"
+      code_location: "third_party/RAP/prune.py:775"
+      no_alignment_constraint: true
+    contrast_with_palu:
+      palu_formula: "rounding_search_result(config, block_size=32)"
+      palu_always_aligned: true
+    supports_claim: "非量化 SVD 压缩会产生不对齐维度，导致 GPU 性能下降"
+    paper_section: "Section 5 (E2E Validation)"
+    figure_ref: "Figure 6"
+    next_steps:
+      - "运行 E2E benchmark: RAP_SVD vs RAP_SVD+Repair"
+      - "测量 speedup 并更新论文 Figure 6"
+
 c5_status_summary:
-  date: "2026-01-26"
-  status: "UNBLOCKED - USE RAP SVD"
+  date: "2026-01-27"
+  status: "PARTIALLY_COMPLETE - RAP SVD model ready, E2E benchmark pending"
   previous_blocker: |
     所有可用的 PaLU checkpoint（ratio 0.5-0.9）都使用了 32-倍数量化约束，
     维度 100% 对齐。维度坍塌问题不存在于当前可用模型中。
@@ -396,13 +433,88 @@ c5_status_summary:
     示例：retain_ratio=0.8, head_dim=128
     - RAP SVD: round(128 * 0.8) = 102 ← 不是 8 的倍数！
     - PaLU: round(102 / 32) * 32 = 96 ← 强制对齐
-  validated: false
+  validated: true
+  validation_date: "2026-01-27"
   next_action: |
-    1. 使用 RAP SVD 压缩模型生成不对齐维度
-       python third_party/RAP/prune.py --attention svd --model llama --retain-ratio 0.8
-    2. 验证生成的模型 rank 确实不对齐
+    ✅ COMPLETED:
+    1. 使用 RAP SVD 压缩模型生成不对齐维度 - Job 18533 完成
+    2. 验证生成的模型 rank 确实不对齐 - 100% 不对齐 (head_dim=102)
+
+    REMAINING:
     3. 运行 dimension repair 并测量 speedup
     4. 更新论文 Figure 6 展示 repair 效果
+
+  # 2026-01-27 M2 实验成功记录
+  m2_experiment_success:
+    job_id: 18533
+    date: "2026-01-27"
+    status: "SUCCESS"
+    model_path: "results/rap_svd_misaligned/llama3_8b_svd_r0.8.pt"
+    dims_json_path: "results/rap_svd_misaligned/dims.json"
+    compression_method: "RAP SVD (no alignment constraint)"
+    retain_ratio: 0.8
+    original_head_dim: 128
+    compressed_head_dim: 102
+    alignment_analysis:
+      total_layers: 32
+      k_aligned_8_count: 0
+      k_aligned_8_pct: 0.0
+      k_misaligned_8_pct: 100.0
+      unique_k_ranks: [102]
+      unique_v_ranks: [102]
+    key_finding: |
+      RAP SVD 压缩成功生成了 100% 不对齐的维度！
+      - 所有 32 层的 k_rank_per_head = 102 (102 % 8 = 6, 不对齐)
+      - 所有 32 层的 v_rank_per_head = 102
+      这验证了 findings.yaml 中关于 RAP SVD 不强制对齐的发现。
+    code_fixes_applied:
+      - "ALL_ATTENTION_FUNCTIONS 导入兼容性修复 (transformers < 4.44)"
+      - "Unpack/TransformersKwargs 导入兼容性修复"
+      - "LlamaRotaryEmbedding 签名兼容性修复"
+      - "lm_eval 懒加载以避免 peft 依赖冲突"
+      - "torch_dtype 替代 dtype 参数修复"
+    files_modified:
+      - "third_party/RAP/src/RAPAttention.py"
+      - "third_party/RAP/src/SVDAttention.py"
+      - "third_party/RAP/src/PaLUAttention.py"
+      - "third_party/RAP/src/LlamaModel.py"
+      - "third_party/RAP/src/ops.py"
+    next_steps:
+      - "运行 E2E benchmark: RAP_SVD vs RAP_SVD+Repair"
+      - "测量 speedup 并更新论文 Figure 6"
+
+  # 2026-01-27 M2 实验失败记录 (历史)
+  m2_experiment_attempt_1:
+    job_id: 18530
+    date: "2026-01-27"
+    status: "FAILED"
+    error_type: "ImportError"
+    error_message: |
+      cannot import name 'ALL_ATTENTION_FUNCTIONS' from 'transformers.modeling_utils'
+    root_cause: |
+      RAP 代码使用了 transformers 4.44+ 新增的 ALL_ATTENTION_FUNCTIONS API，
+      但当前环境 transformers 版本为 4.39.3，导致导入失败。
+    evidence:
+      slurm_out: "slurm_logs/18530_rap_svd_compress.out"
+      slurm_err: "slurm_logs/18530_rap_svd_compress.err"
+      result_dir_empty: true
+    impact: |
+      - 无法生成不对齐维度的 RAP SVD 压缩模型
+      - M2 E2E validation 无法进行
+      - 论文 C5 验证仍处于阻塞状态
+    resolution_options:
+      option_a:
+        description: "升级 transformers 到 4.44+"
+        complexity: LOW
+        risk: "可能破坏其他依赖"
+      option_b:
+        description: "修改 RAP 代码移除 ALL_ATTENTION_FUNCTIONS 依赖"
+        complexity: MEDIUM
+        time_estimate: "1-2 hours"
+      option_c:
+        description: "使用替代方法：手动构造不对齐维度测试"
+        complexity: LOW
+        note: "已有 C4 微基准数据可复用"
 
   # 2026-01-26 第三轮分析 - 最终确认
   detailed_analysis_v3:
