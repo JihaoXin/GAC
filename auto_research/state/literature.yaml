@@ -704,5 +704,213 @@ related_work_suggestions:
       - "Palu: KV-Cache Compression with Low-Rank Projection (ICLR 2025)"
       - "CALDERA: Low Rank and Low Precision Decomposition (arXiv 2024)"
 
+# ===== 2026-01-27 最新补充：技术验证和竞争分析 =====
+
+  - date: "2026-01-27"
+    topic: "technical_verification_detailed"
+    query: "FlashAttention PyTorch SDPA Tensor Core technical specifications"
+    purpose: "补充技术验证的详细规格"
+    findings:
+      - title: "FlashAttention 维度约束详细规格"
+        source: "https://github.com/Dao-AILab/flash-attention + vLLM issues"
+        relevance: "核心技术验证"
+        key_points:
+          - "FlashAttention-2 支持 head_dim <= 256"
+          - "FlashAttention-3 (Hopper H100) 主要测试 head_dim 64, 128, 256"
+          - "某些构建要求 head_dim 是 32 的倍数 (错误: headdim not being a multiple of 32)"
+          - "vLLM/xformers 白名单: [64, 80, 96, 112, 128, 256]"
+          - "不在白名单中会触发 ValueError 或 fallback"
+          - "rotary_dim 必须是 16 的倍数"
+
+      - title: "PyTorch SDPA Backend 选择详细逻辑"
+        source: "https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html"
+        relevance: "核心技术验证 - fallback 行为"
+        key_points:
+          - "三种 backend: FlashAttention-2, Memory-Efficient (xformers), Math (C++)"
+          - "cuDNN backend 也可用但限制较多"
+          - "自动选择: 根据输入形状、dtype、硬件自动选择最优 backend"
+          - "Flash 要求: head_dim 是 8 的倍数 (fp16/bf16)，max_head_dim=128"
+          - "Efficient 要求: head_dim 是 8 的倍数"
+          - "Math: 通用 fallback，支持 fp64 但性能差"
+          - "不满足约束时发出 warning 并 fallback"
+          - "Math backend 所有中间值用 fp32 (half/bf16 输入)"
+
+      - title: "Tensor Core mma 指令对齐规格"
+        source: "https://docs.nvidia.com/deeplearning/performance/dl-performance-matrix-multiplication/index.html"
+        relevance: "核心技术验证 - GPU 效率"
+        key_points:
+          - "cuBLAS < 11.0: 维度必须是 16 bytes 倍数 (fp16: 8 elements) 才能用 TC"
+          - "cuBLAS >= 11.0: 任意维度可用 TC，但效率因对齐而异"
+          - "V100/older: 最优 8 elements (fp16)"
+          - "A100: 最优 64 elements (fp16) = 128 bytes 对齐"
+          - "Tile quantization: 不对齐导致 1.5x 额外操作"
+          - "Wave quantization: 可导致 GFLOPS 减半"
+          - "mma 指令格式: m16n8k16, m8n8k4 等"
+          - "ldmatrix 操作: 需要 TMA 16-byte global, 128-byte shared 对齐 (Hopper)"
+    action_items:
+      - "在论文 Background 引用 NVIDIA Matrix Multiplication Guide"
+      - "添加 Table: 不同 head_dim 对应的 backend 和预期性能"
+
+  - date: "2026-01-27"
+    topic: "competitive_analysis_llm_compression"
+    query: "LLM compression methods performance comparison 2024-2025"
+    purpose: "竞争方法的最新性能数据"
+    findings:
+      - title: "GPTQ vs AWQ 性能对比"
+        source: "NVIDIA blog + Medium articles"
+        relevance: "量化方法 baseline"
+        key_points:
+          - "AWQ: MLSys 2024 Best Paper, 2.7x speedup on RTX 4090"
+          - "GPTQ: layer-wise Hessian-based, 276 tok/s baseline"
+          - "Marlin kernel: 712 tok/s (同 GPTQ weights), 2.6x speedup"
+          - "AWQ perplexity 6.84, GPTQ 6.90, GGUF 7.02 (baseline ~6.5)"
+          - "AWQ/BnB coding pass@1: 51.83% (baseline -4%)"
+          - "GPTQ/Marlin coding: ~46% (baseline -10%)"
+          - "4-bit 量化: memory 4x reduction (7B: 28GB -> 3.5GB)"
+
+      - title: "SVD-based 方法的隐藏问题"
+        source: "FlashSVD paper (arXiv 2508.01506)"
+        relevance: "关键发现 - SVD 带来 activation memory overhead"
+        key_points:
+          - "SVD 压缩虽然减少参数量，但增加 activation memory overhead"
+          - "Activation overhead 随 sequence length 和 hidden dim 线性增长"
+          - "导致 naive SVD 压缩实际可能增加 peak inference memory"
+          - "FlashSVD: 消除大型 dense intermediate tensors"
+          - "FlashSVD: 20% faster than vanilla SVD (MNLI: 341ms vs 427.8ms)"
+          - "FlashSVD: peak activation memory 减少 70.2%"
+        implication: "SVD 压缩的 memory tradeoff 比想象复杂，维度问题外还有 activation 问题"
+
+      - title: "Palu (ICLR 2025) 详细技术"
+        source: "https://arxiv.org/abs/2407.21118"
+        relevance: "最相关竞争方法"
+        key_points:
+          - "使用 truncation-aware SVD (来自 SVD-LLM)"
+          - "50% KV-Cache 压缩, up to 1.89x speedup (RoPE attention)"
+          - "64K 序列 + 4-bit quantization: 6.17x speedup over FP16"
+          - "Group-wise low-rank decomposition (G-LRD): group_size=4"
+          - "M-LRD (per-head) vs J-LRD (joint-head): M-LRD 精度损失更大"
+          - "Walsh-Hadamard transform 消除 SVD 引入的 outliers"
+          - "论文未讨论 irregular dimension 的 GPU 性能影响"
+
+  - date: "2026-01-27"
+    topic: "dimension_alignment_solutions"
+    query: "GPU dimension alignment padding solutions neural network"
+    purpose: "现有的维度对齐解决方案"
+    findings:
+      - title: "cuDNN 自动 Padding"
+        source: "https://docs.nvidia.com/deeplearning/performance/dl-performance-convolutional/index.html"
+        relevance: "现有解决方案"
+        key_points:
+          - "cuDNN 7.3+: 自动 padding packed NCHW 数据"
+          - "cuDNN 7.6.3+: 卷积维度自动 padding 以使用 Tensor Cores"
+          - "NHWC 数据: C 和 K 需要是 4 (TF32), 8 (FP16), 16 (INT8) 的倍数"
+          - "NCHW FP16: channels 自动 padding 到 8 的倍数"
+          - "但 NCHW + TC 有额外 transpose 开销"
+
+      - title: "CoRa Tensor Compiler for Ragged Tensors"
+        source: "https://arxiv.org/abs/2110.10221"
+        relevance: "学术解决方案"
+        key_points:
+          - "编译时为 ragged (不规则) tensors 生成高效代码"
+          - "最小化 padding，1.6x speedup over PyTorch (encoder)"
+          - "Multi-head attention: 1.86x speedup on ARM CPU"
+          - "专注于 variable-length sequences，非 head_dim 问题"
+
+      - title: "TMA-Adaptive FP8 Grouped GEMM (Hopper)"
+        source: "https://arxiv.org/abs/2508.16584"
+        relevance: "最新研究 - 消除 padding"
+        key_points:
+          - "Hopper TMA 约束: 16-byte global, 128-byte shared alignment"
+          - "传统方法: padding 以满足对齐要求"
+          - "本文方法: 动态适配，消除 padding overhead"
+          - "针对 MoE 的动态 group sizes"
+          - "K mod 16 = 0 满足基本对齐"
+
+      - title: "ByteTransformer Zero-Padding Algorithm"
+        source: "https://arxiv.org/abs/2210.03052"
+        relevance: "序列 padding 解决方案"
+        key_points:
+          - "消除 variable-length sequences 的 padding 计算"
+          - "使用 mask matrix prefix sum 计算有效 token 位置"
+          - "将 input tensor pack 到连续内存"
+          - "减少计算量从 seq_len × batch_size 到实际 token 数"
+          - "针对序列 padding，非 head_dim padding"
+
+      - title: "Padding-Free Transformer Layers (HuggingFace)"
+        source: "https://huggingface.co/blog/mayank-mishra/padding-free-transformer"
+        relevance: "实践解决方案"
+        key_points:
+          - "FlashAttention 支持 packed sequences (cumulative seq length)"
+          - "类似 NestedTensor 的实现"
+          - "避免 sequence padding 的内存浪费"
+          - "仅针对序列长度，不涉及 head_dim"
+    action_items:
+      - "在 Related Work 区分 sequence padding 和 head_dim padding 问题"
+      - "强调现有方案主要解决 sequence/batch 维度问题"
+      - "我们的 GAC 是首个系统性解决 head_dim collapse 的方案"
+
+# 新增论文引用
+new_papers_to_cite:
+  - title: "FlashSVD: Memory-Efficient Inference with Streaming for Low-Rank Models"
+    source: "https://arxiv.org/abs/2508.01506"
+    venue: "arXiv 2025"
+    relevance: "揭示 SVD 压缩的 activation memory overhead 问题"
+    cited: false
+
+  - title: "TMA-Adaptive FP8 Grouped GEMM"
+    source: "https://arxiv.org/abs/2508.16584"
+    venue: "arXiv 2025"
+    relevance: "最新消除 padding 的方法 (Hopper)"
+    cited: false
+
+  - title: "CoRa: Compilation for Ragged Tensors with Minimal Padding"
+    source: "https://arxiv.org/abs/2110.10221"
+    venue: "MLSys 2022"
+    relevance: "Ragged tensor 编译优化"
+    cited: false
+
+  - title: "ByteTransformer: A High-Performance Transformer"
+    source: "https://arxiv.org/abs/2210.03052"
+    venue: "arXiv 2022"
+    relevance: "Zero-padding for sequences"
+    cited: false
+
+# 竞争方法更新
+competitive_methods_update:
+  - name: "Marlin Kernel"
+    type: "Optimized GPTQ/AWQ Kernel"
+    speedup: "2.6x over GPTQ (712 vs 276 tok/s)"
+    note: "IST Austria 开发，同 GPTQ 量化权重但更快"
+
+  - name: "FlashSVD"
+    type: "Memory-Efficient SVD"
+    benefit: "70% peak activation memory reduction"
+    speedup: "~20% over vanilla SVD"
+    note: "解决 SVD 的 activation memory overhead"
+
+# 关键技术规格总结
+technical_specs_summary:
+  flashattention:
+    supported_head_dims: "all <= 256"
+    optimal_head_dims: "[64, 128, 256]"
+    vllm_whitelist: "[64, 80, 96, 112, 128, 256]"
+    trtllm_whitelist: "[32, 40, 64, 80, 96, 104, 128, 160, 256]"
+    common_constraint: "head_dim % 8 == 0 (some builds require % 32)"
+    backward_constraint: "head_dim > 192 needs A100/H100"
+
+  pytorch_sdpa:
+    backends: ["FLASH_ATTENTION", "EFFICIENT_ATTENTION", "MATH", "CUDNN"]
+    flash_constraint: "head_dim % 8 == 0, head_dim <= 128"
+    efficient_constraint: "head_dim % 8 == 0"
+    math_constraint: "universal fallback, supports fp64"
+    fallback_penalty: "~40x slower than Flash"
+
+  tensor_core_alignment:
+    cublas_pre_11: "dims must be multiple of 16 bytes for TC"
+    cublas_11_plus: "any dims work, but aligned is faster"
+    a100_optimal: "dims multiple of 64 elements (128 bytes for fp16)"
+    tile_quantization: "up to 1.5x overhead for misaligned"
+    wave_quantization: "can halve GFLOPS"
+
 # 最后更新时间
-last_updated: "2026-01-27"
+last_updated: "2026-01-27T15:30:00"

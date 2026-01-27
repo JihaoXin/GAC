@@ -1,569 +1,683 @@
 bottleneck_analysis:
-  bottleneck_score: 7.0
-  implication: 'Technical Quality (7.0/10) 是瓶颈，不是 Presentation (7.5/10)！
+  bottleneck_score: 7.5
+  implication: 'The RAP SVD E2E experiment is COMPLETE (Job 18549) with NEGATIVE results.
 
-    必须添加 EXPERIMENT_REQUIRED 任务来补充 E2E 验证。
+    This is NOT a failure - it''s an important scientific finding that clarifies scope.
 
-    上一轮 100% WRITING_ONLY 策略是错误的，导致 100+ 次停滞。
+
+    Key insight from F5.8:
+
+    - RAP SVD: hidden -> d=102 (misaligned) -> head_dim=128 (aligned) -> SDPA
+
+    - SDPA operates on head_dim=128, which is perfectly aligned
+
+    - Dimension repair on latent space (102->104) doesn''t help SDPA performance
+
+
+    Strategy: Transform negative result into valuable architectural guidance.
 
     '
-  innovation_score: 7.0
-  presentation_score: 7.5
+  innovation_score: 7.5
+  presentation_score: 7.0
   primary_bottleneck: Technical Quality
-  reviewer_explicit_statement: '"The paper''s primary weakness is the gap between
-    kernel-level microbenchmarks
+  reviewer_explicit_statement: '"The paper''s main weakness is the gap between kernel-level
+    results (25-28% speedup)
 
-    and end-to-end system validation. While the SDPA/GEMM experiments convincingly
+    and E2E validation. The RAP SVD E2E validation shows no benefit (-0.8% to -0.9%)
 
-    demonstrate the dimensional collapse phenomenon and the effectiveness of padding,
-
-    there is no end-to-end validation showing that dimension repair improves overall
-
-    inference latency for a real compressed model."
+    because RAP SVD''s SDPA operates on projected aligned dimensions."
 
     '
-  technical_quality_score: 7.0
-  writing_score: 8.0
-created_at: '2026-01-27T12:45:00+08:00'
+  writing_score: 7.0
+created_at: '2026-01-27T17:00:00+08:00'
 execution_order:
-  phase_1_critical_experiment:
-    description: 运行 E2E 验证实验 (最高优先级！)
-    rationale: 'Technical Quality (7.0) 是瓶颈，必须先补充实验数据。
+  phase_1_critical:
+    description: Transform negative result into positive contribution
+    rationale: 'M1 is the key to breaking the stagnation. The E2E data exists, we
+      just
 
-      RAP SVD 模型已就绪，只需运行 benchmark。
-
-      '
-    tasks:
-    - M1_E2E_REPAIR
-  phase_2_major_writing:
-    description: 根据实验结果更新论文 (依赖 Phase 1)
-    rationale: '需要先有 E2E 数据才能决定 Figure 6 的处理方式。
+      need to present it correctly as scope clarification, not failure.
 
       '
     tasks:
-    - M2_FIG6_CONFUSION
-    - M3_ROI_INCONSISTENCY
-  phase_3_minor_fixes:
-    description: Minor issues 修复
-    rationale: 低优先级，不影响分数瓶颈
+    - M1
+    - M2
+  phase_2_figures:
+    description: Figure improvements
+    rationale: M3 depends on M1 for knowing how to use freed space
     tasks:
-    - m1_FLASHATTN_CAVEAT
-    - m2_TABLE1_FOOTNOTE
-    - m3_FIG3_REDUNDANCY
-    - m4_CONCLUSION_DENSE
-    - m5_TENSORRT_COMPARISON
+    - M3
+    - m2
+  phase_3_polish:
+    description: Minor improvements
+    tasks:
+    - m1
+    - m3
+    - m4
+    - m5
 issues:
 - actions:
-  - agent: experimenter
-    expected_output: "JSON 文件包含:\n{\n  \"baseline\": {\"prefill_ms\": X, \"decode_tok_s\"\
-      : Y, \"memory_mb\": Z},\n  \"repaired\": {\"prefill_ms\": X', \"decode_tok_s\"\
-      : Y', \"memory_mb\": Z'},\n  \"speedup\": {\"prefill_pct\": A, \"decode_pct\"\
-      : B},\n  \"repair_strategy\": \"d=102 → d=104/112\",\n  \"memory_overhead_pct\"\
-      : C\n}\n"
-    status: pending
-    step: 1
-    task: '运行 RAP SVD E2E inference benchmark:
+  - agent: writer
+    expected_output: 'Updated Section 6.6 with:
 
+      - Renamed section title
 
-      **模型信息** (来自 findings.yaml F5.5):
+      - Architectural insight prominently placed
 
-      - 路径: results/rap_svd_misaligned/llama3_8b_svd_r0.8.pt
+      - Table 7 (Applicability Checklist)
 
-      - 维度: head_dim=102 (100% 不对齐, 102 % 8 = 6)
-
-      - 大小: 15.2 GB
-
-
-      **实验设计**:
-
-      1. Baseline: RAP SVD 原始模型 (d=102, 不对齐)
-
-      2. Repaired: RAP SVD + dimension repair (d=102 → d=104 或 d=112)
-
-
-      **测量指标**:
-
-      - Prefill latency (ms) @ seq_len=2048
-
-      - Decode throughput (tok/s) @ batch=4
-
-      - Memory usage (MB)
-
-
-      **Slurm 配置**:
-
-      - constraint: gpu_a100_80gb (模型需要大显存)
-
-      - 时间: 30 分钟
-
-
-      **预期结果**:
-
-      - Repair 后 kernel-level speedup 25-30% (已在 C4 验证)
-
-      - E2E speedup 预计 5-15% (Amdahl''s law)
-
-
-      **输出**:
-
-      - results/rap_svd_e2e/comparison.json
-
-      - results/rap_svd_e2e/latency_plot.pdf
+      - Clear framing of negative result as scope clarification
 
       '
-  - agent: writer
-    depends_on:
-    - 1
-    expected_output: main.tex 更新，包含 E2E validation 数据
     status: pending
-    step: 2
-    task: '根据 E2E 实验结果更新论文:
+    step: 1
+    task: 'Reframe Section 6.6 (Limitations) to promote RAP SVD E2E finding:
 
 
-      **选项 A** (如果 speedup > 5%):
+      **Current Structure** (problematic):
 
-      - 创建新 Table: "E2E Dimension Repair Validation"
+      - Section 6.6 "Limitations"
 
-      - 列: Model | Repair | Prefill | Decode | Speedup | Memory
-
-      - 添加到 Section 6.4 或 6.5
+      - Table 6 buried as a negative result
 
 
-      **选项 B** (如果 speedup < 5%):
+      **New Structure**:
 
-      - 在 Limitations 中解释为什么 E2E 收益小于 kernel-level
+      - Rename to "6.6 Architecture-Dependent Applicability"
 
-      - 使用 Amdahl''s Law 分析 attention 占比
+      - Lead with the architectural insight, not the limitation
+
+      - Add Table 7: "Applicability Checklist"
 
 
-      **必须更新的内容**:
+      **Table 7 Format**:
 
-      1. Table 5 或新表添加 RAP SVD 行
+      | Compression Type | SDPA operates on | Repair Benefit? | Example |
 
-      2. Section 6.5 Accuracy Preservation 添加 E2E 验证说明
+      |-----------------|------------------|-----------------|---------|
 
-      3. Conclusion 更新 validation scope
+      | Direct head_dim modification | Compressed dim | Yes (+25-28%) | Custom SVD
+      |
+
+      | SVD with projection | Original dim | No (~0%) | RAP SVD, PaLU |
+
+      | Quantization only | Original dim | N/A | GPTQ, AWQ |
+
+
+      **Key Message**:
+
+      "Dimension repair provides significant benefits (25-28% kernel speedup,
+
+      5.9x ROI) when SDPA operates directly on misaligned dimensions. However,
+
+      SVD-based methods like RAP SVD that project back to aligned dimensions
+
+      before attention do not benefit from post-hoc repair - their architectural
+
+      design already avoids the SDPA performance penalty."
+
+
+      **Data to include from comparison.json**:
+
+      - Prefill: misaligned 290.5ms vs repaired 292.9ms (-0.8%)
+
+      - Decode: misaligned 1009 tok/s vs repaired 1000 tok/s (-0.9%)
+
+      - Memory: 15451 MB vs 15461 MB (+0.1%)
 
       '
   depends_on: []
-  description: '**Reviewer 原文 (Section: Major Issues M1)**:
-
-    "The paper claims 25-30% speedup from dimension repair but only demonstrates
-
-    this at the kernel level (SDPA/GEMM microbenchmarks). There is no measurement
-
-    showing that this translates to actual inference latency improvement."
-
-
-    **为什么是 CRITICAL**:
-
-    - Technical Quality 瓶颈 (7.0/10) 的直接原因
-
-    - Reviewer 明确说这是 "Must Fix"
-
-    - 有现成模型可用: results/rap_svd_misaligned/llama3_8b_svd_r0.8.pt
-
-
-    **Reviewer 建议的修复**:
-
-    - Run inference benchmark with RAP SVD compressed model
-
-    - Apply dimension repair (d=102 → d=104 or d=112)
-
-    - Measure prefill/decode latency before and after repair
-
-    - Add results to Table 5 or create new table
-
-    '
-  id: M1_E2E_REPAIR
-  inner_loop_count: 2
-  max_inner_loops: 3
+  description: "**Review Location**: Section 6.6, Table 6\n\n**Issue**: Table 6 shows\
+    \ repair provides no E2E benefit for RAP SVD\n(-0.8% prefill, -0.9% decode). The\
+    \ current presentation buries this\nimportant finding in limitations.\n\n**Why\
+    \ it matters**: This is a valuable scientific finding - it tells\npractitioners\
+    \ when repair does NOT help. Currently it reads as a failed\nvalidation rather\
+    \ than useful architectural guidance.\n\n**Reviewer Suggestion**:\n- Promote this\
+    \ finding to a main result (not just limitations)\n- Create a clear \"Applicability\
+    \ Table\" showing: Architecture Type | SDPA head_dim | Repair Benefit?\n- Frame\
+    \ as: \"Dimension repair helps when SDPA operates directly on compressed\n  dimensions;\
+    \ does NOT help when architecture projects back to aligned space\"\n\n**Data Source**:\
+    \ results/rap_svd_e2e/20260127_131517/comparison.json\n- Prefill avg speedup:\
+    \ -1.5%\n- Decode avg speedup: -0.7%\n- Memory overhead: +0.1%\n"
+  id: M1
+  inner_loop_count: 0
+  max_inner_loops: 1
   priority: critical
   status: completed
-  title: E2E Validation Missing - RAP SVD Repair Benchmark
-  type: EXPERIMENT_REQUIRED
+  title: RAP SVD E2E Negative Result Framing
+  type: WRITING_ONLY
 - actions:
   - agent: writer
-    depends_on: []
-    expected_output: Figure 6 更新或替换，明确区分 compression vs repair benefit
+    expected_output: 'All ROI numbers consistent throughout paper:
+
+      - Abstract: 5.9x with scope qualifier
+
+      - Section 5.3: 5.9x (minimal), 3.5x (optimal)
+
+      - Figure 5: matching numbers with note about scope
+
+      '
     status: pending
     step: 1
-    task: "根据 M1 的 E2E 实验结果，选择以下方案之一:\n\n**方案 A** (推荐，如果 E2E 实验成功):\n- 替换 Figure 6\
-      \ 为 RAP SVD E2E repair 对比图\n- 展示: baseline (d=102) vs repaired (d=104/112) 的\
-      \ latency 对比\n- 更有说服力地展示 dimension repair 效果\n\n**方案 B** (如果 E2E speedup 很小):\n\
-      - 保留 Figure 6 但重命名:\n  \"PaLU Compression Benefit (Orthogonal to Dimension Repair)\"\
-      \n- 在 caption 第一句强调这是 compression benefit，不是 repair benefit\n- 添加注释: \"Note:\
-      \ 11.5x speedup from reduced KV cache, not dimension repair\"\n"
+    task: 'Fix ROI consistency across the paper:
+
+
+      **Abstract** (line ~15):
+
+      Current: "achieving 5.9-6.7x return on investment"
+
+      Change to: "achieving 5.9x average ROI for direct SDPA operations
+
+      (22% speedup at 3.7% memory cost)"
+
+
+      **Section 5.3** (Repair Tradeoff):
+
+      Ensure numbers match Figure 5:
+
+      - MINIMAL: 22% avg speedup, 3.7% avg overhead, 5.9x ROI
+
+      - OPTIMAL: 25% avg speedup, 7.2% avg overhead, 3.5x ROI
+
+
+      **Figure 5 Caption**:
+
+      Add scope qualifier: "(Direct SDPA benchmarks; SVD projection architectures
+
+      show different results - see Section 6.6)"
+
+
+      **Conclusion**:
+
+      Update any ROI mention to be consistent with 5.9x/3.5x
+
+      '
+  depends_on: []
+  description: '**Review Location**: Abstract says "5.9-6.7x", Figure 5 caption says
+    "5.9x/3.5x"
+
+
+    **Issue**: The ROI numbers are inconsistent across the paper:
+
+    - Abstract: "5.9-6.7x return on investment"
+
+    - Figure 5: "Min: 22%/3.7% = 5.9x ROI", "Opt: 25%/7.2% = 3.5x ROI"
+
+    - Earlier versions mentioned 6.7x
+
+
+    **Why it matters**: Inconsistent numbers undermine credibility.
+
+
+    **Resolution**: Use Figure 5 data as ground truth:
+
+    - MINIMAL strategy: 22% speedup / 3.7% memory = 5.9x ROI
+
+    - OPTIMAL strategy: 25% speedup / 7.2% memory = 3.5x ROI
+
+
+    Update abstract to use consistent numbers with scope qualifier.
+
+    '
+  id: M2
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: high
+  status: completed
+  title: ROI Number Inconsistency
+  type: WRITING_ONLY
+- actions:
+  - agent: writer
+    expected_output: 'Figure 6 removed OR repurposed with:
+
+      - More compact presentation
+
+      - Better space utilization
+
+      - Clear scope differentiation
+
+      '
+    status: pending
+    step: 1
+    task: 'Handle Figure 6 based on Option A (recommended):
+
+
+      **Remove Figure 6 entirely**:
+
+      - Delete the figure from Latex/main.tex
+
+      - Keep Table 5 which contains the same data in more compact form
+
+      - Update any cross-references to Figure 6
+
+
+      **Use freed space for**:
+
+      - Expanded Section 6.6 (Architecture-Dependent Applicability)
+
+      - Table 7 (Applicability Checklist)
+
+      - Additional text explaining the RAP SVD architecture
+
+
+      **Alternative (Option C)** if reviewers want a figure:
+
+      Repurpose Figure 6 as "Scope Comparison" showing:
+
+      - Left bar: Direct SDPA repair (+27.8% speedup) - from C4 data
+
+      - Right bar: SVD projection repair (0% speedup) - from RAP E2E data
+
+      - Caption: "Dimension repair effectiveness depends on compression architecture"
+
+
+      Update scripts/create_paper_figures.py if creating new figure.
+
+      '
   depends_on:
-  - M1_E2E_REPAIR
-  description: '**Reviewer 原文 (Section: Major Issues M2)**:
-
-    "Figure 6 shows PaLU compression benefits (11.5x decode speedup), which is
-
-    orthogonal to the paper''s main contribution (dimension repair). This figure
-
-    can confuse readers into thinking the 11.5x speedup is from dimension repair
-
-    when it''s actually from KV cache compression."
+  - M1
+  description: '**Review Location**: Page 5, Figure 6
 
 
-    **建议修复**:
+    **Issue**: Figure 6 shows PaLU compression benefits (11.5x decode speedup),
 
-    - Replace Figure 6 with E2E dimension repair validation (RAP SVD before/after)
+    which is orthogonal to the paper''s main contribution. The figure takes
 
-    - Or: More clearly label Figure 6 as "contextualizing compression benefits"
-
-    '
-  id: M2_FIG6_CONFUSION
-  inner_loop_count: 0
-  max_inner_loops: 2
-  priority: high
-  status: completed
-  title: Figure 6 Positioning Confusion
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: ROI 数字全文一致
-    status: pending
-    step: 1
-    task: '统一 ROI 数字:
+    ~40% of page height for a simple 4-bar comparison.
 
 
-      **分析**:
+    **Why it matters**: Space is precious in a 6-page paper. This space would
 
-      - 6.9x = d=107 单点最优: 27.8% speedup / 4.7% overhead ≈ 5.9x (约等于 6.9x?)
-
-      - 5.8x = 512 heads 平均 (Minimal strategy)
-
-      - 3.5x = 512 heads 平均 (Optimal strategy)
+    be better used for E2E repair validation or expanded limitations discussion.
 
 
-      **修复方案**:
+    **Options**:
 
-      1. 在 Abstract 中使用 "up to 6.9x" 或 "5.8x average"
+    - Option A (Recommended): Remove Figure 6, keep only Table 5
 
-      2. 在 Section 5.3 明确定义 ROI 计算方法
+    - Option B: Reduce Figure 6 to 50% size, use freed space for Section 6.6 expansion
 
-      3. Figure 5 annotation 保持 5.8x/3.5x (平均值)
-
-      4. 正文中区分 "peak ROI (6.9x for d=107)" 和 "average ROI (5.8x)"
-
-
-      **具体修改位置**:
-
-      - Abstract: 改为 "5.8x average return on investment"
-
-      - Section 6.1: 添加 "(6.9x peak, 5.8x average)"
-
-      - Figure 5 caption: 保持不变 (已经正确)
-
-      '
-  depends_on: []
-  description: '**Reviewer 原文 (Section: Major Issues M3)**:
-
-    "The ROI numbers are inconsistent:
-
-    - Abstract: ''6.9x return on investment''
-
-    - Figure 5 caption: ''6.9x ROI''
-
-    - Figure 5 annotation box: ''Min: 22%/3.7%=5.8x ROI'' and ''Opt: 25%/7.2%=3.5x
-    ROI''
-
-    - Section 6.1: ''6.9x ROI''
-
-    The 6.9x doesn''t match the 5.8x shown in the figure annotation."
+    - Option C: Repurpose Figure 6 for scope comparison
 
     '
-  id: M3_ROI_INCONSISTENCY
+  id: M3
   inner_loop_count: 0
   max_inner_loops: 1
   priority: high
   status: completed
-  title: ROI Inconsistency in Text
+  title: Figure 6 Oversized and Orthogonal
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: FlashAttention version caveat 只出现一次
+    expected_output: Figure 3 caption simplified, no redundant disclaimer
     status: pending
     step: 1
-    task: '在 Limitations 中添加一次性说明:
+    task: 'Simplify Figure 3 presentation:
 
-      "Our experiments use FlashAttention 2.7.4; future versions may implement
+      - Keep the "THEORETICAL ANALYSIS" banner in the figure
 
-      internal alignment handling that reduces the performance gap."
+      - Remove or shorten the redundant note in the caption
 
-      删除 Section 2.2 和 4.1 中的重复说明。
+      - Ensure caption focuses on the data, not the disclaimer
 
       '
   depends_on: []
-  description: '"The caveat ''Results are specific to FlashAttention 2.7.4...'' appears
-    twice.
+  description: '**Review Location**: Page 2, Figure 3
 
-    Consolidate into a single prominent note in the Limitations section."
+    **Issue**: Figure 3 has both "THEORETICAL ANALYSIS" banner inside the
+
+    figure AND explanatory note in caption. This is redundant.
+
+    **Suggestion**: Keep the banner (visually prominent), simplify caption.
 
     '
-  id: m1_FLASHATTN_CAVEAT
+  id: m1
   inner_loop_count: 0
   max_inner_loops: 1
   priority: low
   status: completed
-  title: FlashAttention Version Caveat Placement
+  title: Figure 3 Double Emphasis
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: MEM_EFFICIENT 限制在正文中说明
+    expected_output: Figure 5 with readable, non-overlapping labels
     status: pending
     step: 1
-    task: '在 Section 3.3 正文中添加:
+    task: 'Fix Figure 5 label overlap in scripts/create_paper_figures.py:
 
-      "Notably, MEM_EFFICIENT backend is completely unavailable for d=107
+      - Adjust label positions for d=107, d=117, d=125
 
-      due to its strict 8-alignment requirement, forcing the system to rely
+      - Consider using adjustText library or manual offsets
 
-      on either FLASH or MATH backends."
+      - Or use leader lines to connect labels to points
+
+      - Regenerate figure and update Latex/figures/fig5_repair_tradeoff.pdf
 
       '
   depends_on: []
-  description: '"The footnote explaining why MEM_EFFICIENT is N/A for d=107 is helpful
-    but small.
+  description: '**Review Location**: Page 4, Figure 5
 
-    Consider adding this finding to the main text in Section 3.3."
+    **Issue**: Labels for d=107, d=117, d=125 cluster in the upper-left
+
+    region, making them hard to read.
+
+    **Suggestion**: Adjust label positions or use leader lines.
 
     '
-  id: m2_TABLE1_FOOTNOTE
+  id: m2
   inner_loop_count: 0
   max_inner_loops: 1
   priority: low
   status: completed
-  title: Table 1 MEM_EFF N/A Explanation
+  title: Figure 5 Label Overlap
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: Figure 3 无重复标记
+    expected_output: Page 6 better utilized with relevant content
     status: pending
     step: 1
-    task: '保留 banner，删除 caption 中的 "[Theoretical Analysis]" 前缀。
+    task: 'Utilize Page 6 blank space with content from:
 
-      Banner 更视觉突出，caption 可以直接描述内容。
+
+      Option 1: Expand Section 6.6 (Applicability)
+
+      - Add RAP SVD architecture diagram (text-based)
+
+      - Expand Applicability Table discussion
+
+
+      Option 2: Add Section 6.7 "Hardware Generalization"
+
+      - Discuss H100 implications briefly
+
+      - Note FlashAttention-3 may have different constraints
+
+
+      Option 3: Expand Related Work
+
+      - Add more citations (see m4)
+
+      - Discuss how other frameworks handle alignment
+
+
+      Target: Page 6 utilization from ~50% to ~80%
+
+      '
+  depends_on:
+  - M1
+  - M3
+  description: '**Review Location**: Page 6
+
+    **Issue**: Approximately 50% of page 6 appears to be blank space after
+
+    the conclusion.
+
+    **Suggestion**: Add brief discussion of H100 implications or expanded
+
+    architectural guidance.
+
+    '
+  id: m3
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: medium
+  status: completed
+  title: Page 6 Unused Space
+  type: WRITING_ONLY
+- actions:
+  - agent: writer
+    expected_output: 'References increased to 18-22 entries:
+
+      - New citations in Related Work
+
+      - New technical references in Background
+
+      - Updated references.bib
+
+      '
+    status: pending
+    step: 1
+    task: 'Add citations from literature.yaml to the paper:
+
+
+      **Related Work section additions** (from literature.yaml):
+
+      - SVD-LLM (ICLR 2025) - truncation-aware SVD
+
+      - AWQ (MLSys 2024 Best Paper) - quantization comparison
+
+      - GPTQ (ICLR 2023) - quantization baseline
+
+      - vLLM (SOSP 2023) - inference framework
+
+      - FlashDecoding++ (MLSys 2024) - GEMM shape sensitivity
+
+
+      **Background section additions**:
+
+      - NVIDIA Matrix Multiplication Guide (technical reference)
+
+      - FlashAttention-2 constraints discussion
+
+
+      **Target**: Increase from 12 to 18-22 references
+
+
+      Update Latex/references.bib with new entries.
 
       '
   depends_on: []
-  description: '"The figure has both ''THEORETICAL ANALYSIS'' banner inside and
+  description: '**Review Location**: Page 7
 
-    ''[Theoretical Analysis]'' in the caption. This is redundant."
+    **Issue**: Only 12 references for a systems paper. Typically 20-30 expected.
+
+    **Suggestion**: Add citations for:
+
+    - More LLM compression methods (LoRA, QLoRA, GGUF)
+
+    - FlashAttention-3 if applicable
+
+    - More GPU optimization work
+
+
+    **Note**: literature.yaml already has comprehensive findings. Just need to
+
+    add citations to the paper from that research.
 
     '
-  id: m3_FIG3_REDUNDANCY
+  id: m4
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: medium
+  status: completed
+  title: References Light
+  type: WRITING_ONLY
+- actions:
+  - agent: writer
+    expected_output: FlashAttention version caveat added to Background
+    status: pending
+    step: 1
+    task: 'Add FlashAttention version caveat to Background:
+
+
+      In Section 2.2 (Background), add a sentence:
+
+      "Our analysis targets FlashAttention 2.7.4; future versions may implement
+
+      internal alignment handling that changes these constraints."
+
+
+      This prepares readers for the limitations discussion later.
+
+      '
+  depends_on: []
+  description: '**Review Location**: Section 6.6(2)
+
+    **Issue**: The caveat "Results are specific to FlashAttention 2.7.4; future
+
+    versions may implement internal alignment handling" is important but buried.
+
+    **Suggestion**: Consider adding this to Section 2.2 (Background) as well.
+
+    '
+  id: m5
   inner_loop_count: 0
   max_inner_loops: 1
   priority: low
   status: completed
-  title: Figure 3 Title Redundancy
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: Conclusion 更简洁，聚焦 takeaways
-    status: pending
-    step: 1
-    task: '简化 Conclusion:
-
-      - 第一段: 问题定义 + 核心发现 (无数字)
-
-      - 第二段: 解决方案 + 主要结果 (1-2 个关键数字)
-
-      - 第三段: 影响 + future work
-
-      删除重复的数字 (6.9x ROI 等)
-
-      '
-  depends_on: []
-  description: '"The conclusion packs many numbers into two paragraphs. Focus on key
-
-    takeaways and implications rather than repeating all numbers."
-
-    '
-  id: m4_CONCLUSION_DENSE
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: low
-  status: completed
-  title: Conclusion Overly Dense
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: TensorRT 对比在 Limitations 中说明
-    status: pending
-    step: 1
-    task: '在 Limitations 中添加:
-
-      "We leave comparison with TensorRT-LLM''s runtime padding strategies
-
-      to future work. Our compile-time approach avoids runtime overhead
-
-      but requires knowledge of tensor shapes before deployment."
-
-
-      在 Table 6 中确保 TensorRT 行有 "Runtime padding" 说明。
-
-      '
-  depends_on: []
-  description: '"The paper mentions TensorRT may perform implicit runtime padding
-    but doesn''t
-
-    compare: Is compile-time repair actually faster than TensorRT''s runtime approach?"
-
-    '
-  id: m5_TENSORRT_COMPARISON
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: low
-  status: completed
-  title: Missing Comparison with TensorRT Padding
+  title: FlashAttention Version Caveat
   type: WRITING_ONLY
 notes:
-- ⚠️ 本轮纠正了上一轮的瓶颈误判！Technical Quality (7.0) 是瓶颈，不是 Presentation
-- 'RAP SVD 模型已就绪: results/rap_svd_misaligned/llama3_8b_svd_r0.8.pt'
-- 虽然 RAP SVD PPL=92.39 很高，但 E2E latency 数据仍有价值
-- Reviewer 明确要求 E2E validation，必须完成
-- 如果本轮实验成功，可显著提升 Technical Quality 分数
-planner_summary: '**⚠️ 关键纠正: 瓶颈重新识别！**
-
-
-  上一轮 action_plan 错误判断 Presentation 是瓶颈 (6.5/10)。
-
-  实际上，新 review 明确指出 Technical Quality (7.0/10) 是瓶颈！
-
-
-  **Major Issues 分析**:
-
-  1. M1. E2E Validation Missing → EXPERIMENT_REQUIRED (高优先级！)
-
-  2. M2. Figure 6 Positioning Confusion → WRITING_ONLY
-
-  3. M3. ROI Inconsistency in Text → WRITING_ONLY
-
-
-  **本轮核心策略**:
-
-  运行 RAP SVD E2E benchmark：
-
-  - 模型已就绪: results/rap_svd_misaligned/llama3_8b_svd_r0.8.pt
-
-  - 维度 100% 不对齐 (d=102)
-
-  - 对比: RAP SVD baseline vs RAP SVD + dimension repair
-
-
-  **预期效果**:
-
-  - Technical Quality: 7.0 → 7.5+ (+0.5 * 0.4 = +0.2 weighted)
-
-  - 总分: 7.25 → 7.45+
-
-
-  **为什么这次会有效**:
-
-  - 之前卡在"没有 E2E 数据"
-
-  - 现在 RAP SVD 模型已生成，只需跑 benchmark
-
-  - Reviewer 明确要求这个实验
-
-  '
-review_iteration: 101
+- All tasks are WRITING_ONLY - no new experiments needed
+- E2E data from Job 18549 is complete and valid
+- 'Key pivot: negative result -> scope clarification'
+- C4 micro-benchmark (+25-28%) remains the primary positive evidence
+- RAP SVD E2E (-1.5%) is now architectural guidance, not failure
+- literature.yaml has comprehensive research - just need to cite it
+planner_summary: "## Context\n\nThe RAP SVD E2E experiment (Job 18549) is COMPLETE\
+  \ with the following results:\n- Prefill speedup: -1.5% (repair is SLOWER)\n- Decode\
+  \ speedup: -0.7% (repair is SLOWER)\n- Memory overhead: +0.1% (minimal)\n\n## Root\
+  \ Cause Analysis (from findings.yaml F5.8)\n\nRAP SVD forward path:\n1. k_proj_A:\
+  \ hidden (4096) -> k_latent (102, MISALIGNED)\n2. KV cache stores k_latent\n3. k_proj_B:\
+  \ k_latent (102) -> k_states (head_dim=128, ALIGNED)\n4. SDPA: Q @ K^T @ V operates\
+  \ on head_dim=128 (ALIGNED)\n\nDimension misalignment only affects k_proj_A/B GEMMs,\
+  \ NOT the SDPA.\nRepair increases latent GEMM compute without improving SDPA performance.\n\
+  \n## Strategy for This Iteration\n\n**PIVOT**: Transform negative result into positive\
+  \ contribution\n\n1. **M1 (Critical)**: Promote RAP SVD E2E finding to main result\n\
+  \   - Not a limitation, but architectural guidance\n   - \"Repair helps when SDPA\
+  \ operates directly on compressed dims\"\n   - \"Repair doesn't help when architecture\
+  \ projects to aligned space\"\n\n2. **M2 (High)**: Fix ROI number inconsistency\n\
+  \   - Standardize to 5.9x (minimal) / 3.5x (optimal) from Figure 5\n   - Add scope\
+  \ qualifier: \"for direct SDPA operations\"\n\n3. **M3 (High)**: Resize/repurpose\
+  \ Figure 6\n   - Option A: Remove Figure 6, keep Table 5 only\n   - Option B: Repurpose\
+  \ for scope comparison (Direct vs SVD-based)\n\n4. **Minor fixes**: Label overlap,\
+  \ references, page utilization\n\n## Expected Outcome\n\nBy honestly presenting\
+  \ the negative result as scope clarification:\n- Technical Quality: 7.5 -> 7.7 (improved\
+  \ scientific rigor)\n- Presentation: 7.0 -> 7.3 (clearer scope, better figures)\n\
+  - Total: 7.25 -> 7.5+\n"
+review_iteration: 103
 review_score: 7.25
 stagnation_analysis:
+  breakthrough_strategy: 'PIVOT: Stop seeking positive E2E results. Instead:
+
+    1. Present negative result as valuable scientific finding
+
+    2. Clearly scope when dimension repair helps vs. doesn''t help
+
+    3. Strengthen C4 micro-benchmark as primary positive evidence
+
+    4. Create applicability table for practitioners
+
+    '
   iterations_without_progress: 100+
-  new_approach: '**策略彻底转变**: 聚焦 E2E 实验验证
+  score_history:
+  - 7.25
+  - 7.25
+  - 7.25
+  - 7.25
+  - 7.25
+  - 7.25
+  score_variance: 0.0
+  this_iteration_different_from_last: 'Previous: Attempted to find/fix E2E experiments
+    to show positive results
+
+    Current: Accept negative result, reframe as scope clarification
 
 
-    关键发现 (来自 findings.yaml):
+    This is fundamentally different because we''re no longer trying to "fix" the E2E
 
-    1. RAP SVD 压缩模型已生成: results/rap_svd_misaligned/llama3_8b_svd_r0.8.pt
-
-    2. 模型维度 100% 不对齐 (d=102, 102 % 8 = 6)
-
-    3. E2E benchmark 处于 "pending" 状态
-
-
-    这是 **唯一缺失的实验**！
-
-    '
-  this_iteration_different_from_last: '上一轮: 100% WRITING_ONLY 任务 (错误策略)
-
-    本轮: 添加 EXPERIMENT_REQUIRED 任务 (M1_E2E_REPAIR)
-
-
-    改变原因:
-
-    - 重新阅读 latest_review.md 发现瓶颈是 Technical Quality (7.0)
-
-    - RAP SVD 模型已就绪，只需运行 E2E benchmark
-
-    - Reviewer 明确说需要 E2E validation
+    validation - we''re presenting the actual findings honestly.
 
     '
-  why_stagnated: '上一轮 action_plan 错误判断瓶颈！
+  why_stagnated: 'Previous iterations kept waiting for "positive E2E data" that cannot
+    exist
 
-    - 上一轮判断: Paper Presentation (6.5/10) 是瓶颈
+    given RAP SVD''s architecture. The experiment completed (Job 18549) but showed
 
-    - 实际情况: Technical Quality (7.0/10) 是瓶颈
-
-    - 导致: 100+ 次纯 WRITING_ONLY 迭代无效果
+    repair provides NO benefit (-1.5% prefill, -0.7% decode).
 
     '
 success_criteria:
   expected_score_improvement:
+    confidence: medium-high
     current: 7.25
-    rationale: 'Technical Quality: 7.0 → 7.5 (+0.5 * 0.4 = +0.2 weighted)
-
-      (通过 E2E validation 填补 kernel-to-system gap)
-
-
-      Total: 7.25 + 0.2 = 7.45 → 7.5 (四舍五入)
-
-
-      如果 E2E speedup 显著 (>10%)，可能达到:
-
-      Technical Quality: 7.0 → 8.0 (+0.4 weighted)
-
-      Total: 7.25 + 0.4 = 7.65
-
-      '
     target: 7.5
   must_complete:
-  - 'M1_E2E_REPAIR: RAP SVD E2E benchmark 成功运行并获得数据'
-  - 论文中包含 E2E validation 结果
+  - 'M1: RAP SVD negative result reframed as scope clarification'
+  - 'M2: ROI numbers consistent throughout paper'
+  - Applicability Table added (Table 7)
   nice_to_have:
-  - Minor issues 修复
+  - 'm1-m3: Minor figure/space fixes'
+  - 'm5: FlashAttention caveat in Background'
+  rationale: '**Technical Quality** (7.5 -> 7.7):
+
+    - Honest reporting of negative result shows scientific rigor (+0.1)
+
+    - Clear scope definition helps practitioners (+0.1)
+
+
+    **Presentation** (7.0 -> 7.3):
+
+    - Figure 6 space better utilized (+0.1)
+
+    - Applicability table adds clarity (+0.1)
+
+    - Label overlap fixed (+0.1)
+
+
+    **Writing Quality** (7.0 -> 7.2):
+
+    - More references (+0.1)
+
+    - Clearer scope language (+0.1)
+
+
+    Total: 7.25 -> 7.45-7.55
+
+    '
   should_complete:
-  - 'M3_ROI_INCONSISTENCY: ROI 数字一致'
-  - 'M2_FIG6_CONFUSION: Figure 6 明确标注'
+  - 'M3: Figure 6 handled (removed or repurposed)'
+  - 'm4: References increased to 18+'
 writing_tasks:
 - changes_required:
-  - change: 添加 RAP SVD E2E 对比 Table
-    section: Section 6.4 或 6.5
-  - change: 更新 E2E validation scope
-    section: Section 8 Conclusion
-  description: 根据 E2E 实验结果更新论文 Tables/Figures
-  id: M1_E2E_REPAIR
+  - change: Rename to 'Architecture-Dependent Applicability', promote finding
+    section: Section 6.6
+  - change: Add Applicability Checklist table
+    section: Table 7 (new)
+  - change: Update to reflect scope clarification
+    section: Conclusion
+  description: Reframe RAP SVD E2E negative result as architectural guidance
+  id: M1
   target_files:
   - Latex/main.tex
 - changes_required:
-  - change: 替换为 RAP SVD E2E repair 对比，或添加 'orthogonal' 注释
+  - change: Update ROI to 5.9x with scope qualifier
+    section: Abstract
+  - change: Ensure 5.9x/3.5x numbers consistent
+    section: Section 5.3
+  - change: Add scope note
+    section: Figure 5 caption
+  description: Fix ROI number consistency
+  id: M2
+  target_files:
+  - Latex/main.tex
+- changes_required:
+  - change: Remove or repurpose
     section: Figure 6
-  description: 替换或重新标注 Figure 6
-  id: M2_FIG6_CONFUSION
+  - change: Ensure kept as primary presentation
+    section: Table 5
+  description: Handle Figure 6
+  id: M3
   target_files:
   - Latex/main.tex
   - scripts/create_paper_figures.py
 - changes_required:
-  - change: 改为 '5.8x average ROI' 或 'up to 6.9x ROI'
-    section: Abstract
-  - change: 明确 peak vs average
-    section: Section 6.1
-  description: 统一 ROI 数字
-  id: M3_ROI_INCONSISTENCY
+  - change: Add citations for SVD-LLM, AWQ, vLLM, FlashDecoding++
+    section: Related Work
+  - change: Add 6-10 new entries
+    section: references.bib
+  description: Add more references
+  id: m4
   target_files:
   - Latex/main.tex
+  - Latex/references.bib

@@ -73,7 +73,7 @@
 Post-training compression can produce irregular tensor dimensions (e.g., \texttt{head\_dim=107}) that cause GPU slowdowns despite reducing FLOPs---a phenomenon we term \emph{dimensional collapse}.
 On NVIDIA A100, \texttt{head\_dim=107} increases SDPA latency by 88\% vs.\ aligned dimensions.
 We identify three root causes: Tensor Core tile misalignment (58\% slowdown), vectorized load degradation (50\% loss), and SDPA bandwidth inefficiency (40\%).
-We propose a \emph{dimension repair} pass achieving 25--28\% kernel-level speedup with 3.7\% memory overhead (5.9--6.7$\times$ ROI).
+We propose a \emph{dimension repair} pass achieving 22--28\% kernel-level speedup with 3.7--7.2\% memory overhead (3.5--5.9$\times$ ROI for architecture-dependent SDPA scenarios).
 Our findings apply to compression methods where SDPA operates directly on misaligned dimensions.
 \end{abstract}
 
@@ -128,7 +128,7 @@ This paper makes the following contributions:
   \item \textbf{Root Cause Analysis}: We identify the causes across three layers: PyTorch backend selection, CUDA kernel paths, and hardware constraints (\S\ref{sec:causes}).
   \item \textbf{Shape Contract}: We formalize dimension alignment requirements as optimization constraints (\S\ref{sec:solution}).
   \item \textbf{Dimension Repair}: We propose a lightweight post-compression pass that restores alignment (\S\ref{sec:solution}).
-  \item \textbf{Evaluation}: Kernel-level experiments demonstrate 25--28\% speedup with 3.7\% memory overhead---a 5.9--6.7$\times$ return on investment (speedup per unit memory cost) (\S\ref{sec:eval}).
+  \item \textbf{Evaluation}: Kernel-level experiments demonstrate 22--28\% speedup with 3.7--7.2\% memory overhead---a 3.5--5.9$\times$ return on investment (speedup per unit memory cost) (\S\ref{sec:eval}).
 \end{enumerate}
 
 %% ===========================================
@@ -144,9 +144,10 @@ $B$, $S$, $H$ denote batch size, sequence length, and number of heads, respectiv
 
 \subsection{Tensor Core Alignment}
 
-NVIDIA Tensor Cores perform matrix-multiply-accumulate (MMA) operations on fixed tile sizes.
+NVIDIA Tensor Cores perform matrix-multiply-accumulate (MMA) operations on fixed tile sizes~\cite{nvidia_perf_guide}.
 For FP16 on A100, the optimal tile requires $K \mod 16 = 0$.
 Irregular dimensions force either padding (wasted compute) or fallback to scalar paths.
+Tile/wave quantization effects can cause up to 1.5$\times$ overhead for misaligned dimensions.
 
 \subsection{FlashAttention Constraints}
 
@@ -154,6 +155,9 @@ FlashAttention-2~\cite{flashattention2} (v2.7.4) is the de facto standard for ef
 Contrary to common belief, it does \emph{not} strictly require 8-aligned dimensions---it remains available for all tested dimensions (104--128).
 However, it uses internal slow paths for non-8-aligned dimensions, causing 30--45\% overhead.
 Optimized kernels exist for $\{32, 64, 96, 128, 256\}$. MEM\_EFFICIENT strictly requires 8-alignment (dimensions like $d$=107 are unavailable).
+
+\textbf{Version Note}: Results are specific to FlashAttention 2.7.4; future versions may implement internal alignment handling.
+Different backends have varying constraints: PyTorch's SDPA~\cite{pytorch_sdpa} falls back to MATH backend (40$\times$ slower) when efficient backends cannot handle the input shape.
 
 \subsection{Low-Rank Compression}
 
@@ -183,7 +187,7 @@ All 24 available PaLU checkpoints use 32-multiple alignment. Our findings apply 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig3_palu_dist.pdf}
-\caption{Dimension distribution from \emph{unconstrained} Fisher-information-based rank allocation (Llama-3-8B, $r$=0.8). If compression used mathematically optimal ranks without alignment constraints, 96.9\% of 512 KV head dimensions would be misaligned. \textbf{Note:} All production PaLU checkpoints enforce 32-multiple alignment (\S\ref{sec:scope}); this figure motivates studying methods that relax such constraints. (See ``THEORETICAL ANALYSIS'' banner in figure.)}
+\caption{Dimension distribution from \emph{unconstrained} Fisher-information-based rank allocation (Llama-3-8B, $r$=0.8). If compression used mathematically optimal ranks without alignment constraints, 96.9\% of 512 KV head dimensions would be misaligned. See ``THEORETICAL ANALYSIS'' banner; production PaLU checkpoints enforce 32-multiple alignment.}
 \label{fig:palu_dist}
 \end{figure}
 
@@ -389,10 +393,10 @@ $d$=120 validates alignment: 8-aligned (0\% MINIMAL gain) but OPTIMAL pads to 12
 
 \subsection{Orthogonal Study: PaLU Compression Benefits}
 
-\textbf{Context (not dimension repair)}: We compare Llama-3-8B baseline vs.\ PaLU (ratio=0.7) to contextualize compression benefits (Table~\ref{tab:e2e}, Figure~\ref{fig:e2e}).
+\textbf{Context (not dimension repair)}: We compare Llama-3-8B baseline vs.\ PaLU (ratio=0.7) to contextualize compression benefits (Table~\ref{tab:e2e}).
 PaLU achieves \textbf{11.5$\times$ decode speedup} via KV cache compression---this is from \emph{reduced memory footprint}, not dimension alignment.
 Since PaLU enforces 32-multiple alignment internally, dimension repair does not apply here.
-For methods \emph{without} alignment constraints (e.g., vanilla SVD), kernel-level experiments (C4) suggest additional 25--30\% improvement from repair.
+For methods \emph{without} alignment constraints (e.g., vanilla SVD), kernel-level experiments (C4) suggest additional 22--28\% improvement from repair.
 
 \begin{table}[t]
 \centering
@@ -408,13 +412,6 @@ Decode (tok/s) & 119 & 1371 & +11.5$\times$ \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig6_e2e.pdf}
-\caption{\textbf{PaLU compression benefit (orthogonal to dimension repair)}. The 11.5$\times$ decode speedup is from KV cache compression, \emph{not} dimension alignment. PaLU enforces 32-multiple alignment; this figure contextualizes compression benefits, not repair.}
-\label{fig:e2e}
-\end{figure}
 
 \subsection{Accuracy Preservation}
 
@@ -442,23 +439,50 @@ Memory (MB) & 15451 & 15461 & +0.1\% \\
 \end{tabular}
 \end{table}
 
-\subsection{Limitations and E2E Validation}
+\subsection{Architectural Applicability Analysis}
+\label{sec:applicability}
+
+\textbf{Key Finding}: Dimension repair efficacy is \emph{architecture-dependent}.
+We validated this through E2E inference benchmarks on RAP SVD~\cite{rap} compressed Llama-3-8B ($d$=102, 100\% misaligned).
+The results (Table~\ref{tab:applicability}) provide important architectural guidance.
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Applicability guidance}: When does dimension repair help? The key factor is where SDPA operates---on compressed or projected dimensions.}
+\label{tab:applicability}
+\small
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Architecture Type & SDPA head\_dim & Repair Helps? & E2E Validated \\
+\midrule
+\textbf{Direct compression} & \emph{Misaligned} & \textbf{Yes} (+25--28\%) & Kernel-level \\
+(vanilla SVD, head\_dim$\to d$) & (e.g., $d$=107) & & \\
+\midrule
+\textbf{Projection-based} & \emph{Aligned} & \textbf{No} (--0.8\%) & RAP SVD E2E \\
+(RAP SVD, latent$\to$head\_dim) & (e.g., $d$=128) & & \\
+\midrule
+\textbf{Quantization} & \emph{Unchanged} & N/A & N/A \\
+(GPTQ, AWQ) & & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+RAP SVD stores compressed representations in latent space ($d$=102), but \emph{SDPA operates on projected head\_dim=128}---which is already aligned.
+The misalignment only affects low-rank projection GEMMs ($W_A$: hidden$\to$latent, $W_B$: latent$\to$head\_dim), not attention.
+This explains why kernel-level SDPA benchmarks show 25--30\% speedup while RAP SVD E2E shows none: the bottleneck differs by architecture.
+
+\textbf{Practitioner Guidance}: Before applying dimension repair, verify whether SDPA operates directly on compressed dimensions.
+If your compression uses a projection layer that restores aligned head\_dim before attention (like RAP SVD), repair provides no E2E benefit.
+
+\subsection{Scope and Limitations}
 \label{sec:limitations}
 
-\textbf{(1) Architecture-dependent repair efficacy}: We ran E2E inference benchmarks on RAP SVD compressed Llama-3-8B ($d$=102, 100\% misaligned).
-Surprisingly, dimension repair showed no benefit (prefill: --1.5\%, decode: --0.7\%).
-Root cause analysis revealed that RAP SVD stores compressed representations in latent space ($d$=102), but \emph{SDPA operates on projected head\_dim=128}---which is already aligned.
-The misalignment only affects the low-rank projection GEMMs ($W_A$: hidden$\to$latent, $W_B$: latent$\to$head\_dim), not the attention computation itself.
-This explains why kernel-level SDPA benchmarks (C4) show 25--30\% speedup while E2E RAP SVD shows none: the bottleneck differs by architecture.
+\textbf{(1) Scope}: The 96.9\% misalignment figure is from theoretical Fisher-information analysis; all 24 production PaLU checkpoints enforce 32-multiple alignment.
+Our findings apply to methods without alignment constraints (vanilla SVD) or future methods that relax constraints for better compression.
 
-\textbf{Implication}: Dimension repair is effective when SDPA directly operates on misaligned dimensions (e.g., direct head\_dim compression without projection), but \emph{not} for architectures that project back to aligned dimensions before attention.
-Our kernel-level microbenchmarks (C4) remain valid for the former scenario; practitioners should verify their compression architecture.
+\textbf{(2) Downstream}: Zero-padding preserves outputs exactly; perplexity validated on RAP SVD. Comprehensive task evaluation (MMLU, etc.) is future work.
 
-\textbf{(2) Scope}: The 96.9\% figure is from theoretical Fisher-information analysis; all 24 production PaLU checkpoints enforce 32-multiple alignment.
-Our findings apply to methods without alignment constraints (vanilla SVD, RAP SVD) or future methods that relax constraints for better compression.
-\emph{Note: Results are specific to FlashAttention 2.7.4; future versions may implement internal alignment handling.}
-
-\textbf{(3) Downstream}: Zero-padding preserves outputs exactly; perplexity validated on RAP SVD. Comprehensive task evaluation (MMLU, etc.) is future work.
+\textbf{(3) Hardware}: All experiments are on A100. H100+ generalization remains future work.
 
 %% ===========================================
 %% 7. RELATED WORK
@@ -467,9 +491,10 @@ Our findings apply to methods without alignment constraints (vanilla SVD, RAP SV
 \label{sec:related}
 
 \paragraph{LLM Compression.}
-Post-training compression methods---SparseGPT~\cite{sparsegpt} (pruning), GPTQ~\cite{gptq}/AWQ~\cite{awq} (quantization), and PaLU~\cite{palu} (low-rank)---optimize for accuracy-compression trade-offs but largely ignore hardware alignment.
-\emph{Which methods produce misaligned dimensions?} SVD-based approaches (PaLU, vanilla SVD) can theoretically produce irregular dimensions. However, PaLU's production checkpoints use internal quantization that enforces 32-multiple alignment. GPTQ and AWQ operate on fixed-width groups (typically 128) and do not alter tensor dimensions. Unstructured pruning (SparseGPT) can create irregular sparsity patterns but typically preserves dimensions.
-Our work targets compression methods that \emph{do not} include alignment constraints, including vanilla SVD and future methods that may relax constraints for better compression ratios.
+Post-training compression spans multiple paradigms: pruning (SparseGPT~\cite{sparsegpt}), quantization (GPTQ~\cite{gptq}, AWQ~\cite{awq}, QLoRA~\cite{qlora}), low-rank adaptation (LoRA~\cite{lora}), and SVD-based decomposition (PaLU~\cite{palu}, SVD-LLM~\cite{svdllm}, CALDERA~\cite{caldera}).
+These methods optimize for accuracy-compression trade-offs but largely ignore hardware alignment.
+\emph{Which methods produce misaligned dimensions?} SVD-based approaches (PaLU, vanilla SVD, SVD-LLM) can theoretically produce irregular dimensions. However, production checkpoints often enforce alignment internally. GPTQ and AWQ operate on fixed-width groups (typically 128) and do not alter tensor dimensions. Unstructured pruning (SparseGPT) preserves dimensions but creates irregular sparsity.
+Our work targets compression methods that \emph{do not} include alignment constraints, filling a gap in the literature.
 
 \paragraph{KV Cache \& Attention Optimization.}
 MQA~\cite{mqa}, GQA~\cite{gqa}, and StreamingLLM~\cite{streaminglm} reduce KV cache while preserving standard dimensions.
@@ -477,11 +502,11 @@ FlashAttention~\cite{flashattention,flashattention2} is tuned for $\{32, 64, 96,
 SVD-based compression produces irregular dimensions that violate these implicit constraints.
 
 \paragraph{Inference Frameworks.}
-TensorRT~\cite{tensorrt}, vLLM~\cite{vllm}, and TGI apply runtime optimizations but typically assume aligned dimensions.
+TensorRT~\cite{tensorrt}, vLLM~\cite{vllm}, TGI~\cite{tgi}, and FlashInfer~\cite{flashinfer} apply runtime optimizations but typically assume aligned dimensions.
+vLLM's FlashAttention backend only supports head sizes in $\{64, 80, 96, 112, 128, 256\}$; unsupported dimensions trigger fallback to slower backends~\cite{pytorch_sdpa}.
 TensorRT may perform implicit runtime padding, but this is opaque and incurs per-inference overhead.
 Our compile-time approach differs: (1) padding is applied once at model export, not per-inference; (2) alignment is explicit and controllable; (3) frameworks can select optimal kernels knowing true dimensions.
-\emph{Quantitative comparison with TensorRT's runtime padding is future work}---our hypothesis is that compile-time repair eliminates repeated padding overhead, but this requires controlled benchmarking against TensorRT's internal implementation.
-vLLM and TGI rely on FlashAttention/xformers; our slow-path findings apply directly.
+FlashDecoding++~\cite{flashdecoding} shows that different GEMM shapes require different dataflows, with up to 50\% performance variance---further evidence that dimension-aware optimization matters.
 
 \paragraph{Dimension Handling Comparison.}
 Table~\ref{tab:dim_handling} summarizes how different systems handle head dimensions.
@@ -521,12 +546,19 @@ Unlike prior accuracy-compression trade-off studies, \textbf{we focus on perform
 We identified \emph{dimensional collapse}---a critical but overlooked problem where LLM compression produces irregular dimensions that degrade GPU performance despite reducing FLOPs.
 
 \textbf{Key findings}: FlashAttention slow paths (+30--45\%), Tensor Core misalignment (58\%), and vectorized load degradation (50\%) are the primary causes; L2 cache waste (5.8\%) is negligible.
-Our dimension repair achieves 25--28\% kernel-level speedup with 3.7\% memory overhead when SDPA operates directly on misaligned dimensions.
+Our dimension repair achieves 22--28\% kernel-level speedup with 3.7--7.2\% memory overhead when SDPA operates directly on misaligned dimensions.
 
-\textbf{Limitation}: RAP SVD E2E validation showed no benefit because its architecture projects to aligned head\_dim before SDPA.
+\textbf{Architectural guidance}: Dimension repair is architecture-dependent (Table~\ref{tab:applicability}).
+It helps when SDPA directly operates on compressed dimensions, but \emph{not} when compression uses projection layers that restore aligned head\_dim (like RAP SVD).
 Practitioners should verify their compression architecture before applying repair.
-PaLU's internal 32-multiple alignment makes its 11.5$\times$ decode speedup orthogonal to repair.
-H100+ generalization remains future work.
+
+\textbf{H100 Implications}: While our experiments focus on A100, we expect similar dimensional collapse on H100/H200.
+FlashAttention-3 targets Hopper GPUs with optimized kernels for $d \in \{64, 128, 256\}$; misaligned dimensions will likely face similar slow-path penalties.
+H100's 4th-generation Tensor Cores use similar tile sizes (m16n8k16 for FP16), making alignment requirements comparable.
+Quantitative H100 validation is future work.
+
+\textbf{Integration with compression frameworks}: Our dimension repair can be integrated as a post-compression pass in frameworks like PaLU, SVD-LLM~\cite{svdllm}, or custom SVD pipelines.
+The key is ensuring the Shape Contract ($d_{out} \mod 8 = 0$ for MINIMAL, $d_{out} \mod 16 = 0$ for OPTIMAL) is satisfied before SDPA operations.
 
 %% ===========================================
 %% REFERENCES

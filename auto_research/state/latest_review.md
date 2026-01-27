@@ -8,11 +8,11 @@
 
 ## Summary
 
-This paper identifies and analyzes "dimensional collapse"---a phenomenon where post-training compression produces irregular tensor dimensions (e.g., `head_dim=107`) that cause significant GPU performance degradation despite reducing FLOPs. The authors systematically investigate the root causes across three layers: PyTorch backend selection, CUDA kernel paths, and hardware constraints (Tensor Core alignment, vectorized loads, SDPA bandwidth).
+This paper investigates an important and underexplored problem: post-training compression of LLMs can produce irregular tensor dimensions that cause GPU performance degradation despite reducing FLOPs. The authors term this phenomenon "dimensional collapse" and systematically analyze its causes across three layers: PyTorch backend selection, CUDA kernel paths, and hardware constraints.
 
-The paper proposes a "dimension repair" solution that pads misaligned dimensions to GPU-friendly values (multiples of 8 or 16), achieving 25-28% kernel-level speedup with only 3.72% memory overhead (6.9x ROI). The evaluation includes microbenchmarks on SDPA and GEMM operations, validation on RAP SVD compression (which produces 100% misaligned dimensions), and contextualization with PaLU compression benefits.
+The key contributions include: (1) quantifying the performance impact (88% latency increase for head_dim=107 vs. 96), (2) identifying root causes (Tensor Core misalignment 58%, vectorized load degradation 50%, SDPA bandwidth inefficiency 40%), and (3) proposing a dimension repair strategy achieving 25-28% kernel-level speedup with 3.7% memory overhead.
 
-The work makes an important observation that has practical implications for LLM compression practitioners: hardware alignment constraints must be considered when designing compression algorithms.
+The paper acknowledges important limitations: the E2E validation on RAP SVD showed no benefit because SDPA operates on projected aligned dimensions, and all PaLU checkpoints use 32-multiple alignment internally. The work is well-positioned for methods that do not include alignment constraints.
 
 ---
 
@@ -20,9 +20,9 @@ The work makes an important observation that has practical implications for LLM 
 
 **Rating: Weak Accept (7.25/10)**
 
-The paper addresses a real and practical problem with clear experimental evidence. The root cause analysis is thorough and the proposed solution is simple yet effective. However, the paper has a significant gap between kernel-level experiments and end-to-end validation. The scope is somewhat narrow (only applicable to methods without alignment constraints), and the E2E integration remains future work.
+The paper addresses an important and practical problem with solid microbenchmark evidence. The root cause analysis is thorough and the dimension repair solution is sound. However, the E2E validation story is incomplete---the RAP SVD E2E experiment showed no benefit (-1.5% to -0.9%) because RAP SVD's SDPA operates on projected aligned dimensions, not the compressed latent space. This architectural limitation weakens the practical impact claims but is honestly disclosed. The presentation quality is good with room for improvement in figure sizing.
 
-**Confidence:** 4/5 (I have good expertise in GPU systems and LLM inference optimization)
+**Confidence:** 4/5 (Strong expertise in GPU optimization and LLM systems)
 
 ---
 
@@ -30,396 +30,382 @@ The paper addresses a real and practical problem with clear experimental evidenc
 
 | Dimension | Weight | Score | Weighted |
 |-----------|--------|-------|----------|
-| Technical Quality | 40% | 7.0/10 | 2.80 |
-| Paper Presentation | 30% | 7.5/10 | 2.25 |
-| Innovation | 20% | 7.0/10 | 1.40 |
-| Writing Quality | 10% | 8.0/10 | 0.80 |
-| **Total** | 100% | - | **7.25/10** |
+| Technical Quality | 40% | 7.5/10 | 3.00 |
+| Paper Presentation | 30% | 7.0/10 | 2.10 |
+| Innovation | 20% | 7.5/10 | 1.50 |
+| Writing Quality | 10% | 7.0/10 | 0.70 |
+| **Total** | 100% | - | **7.3/10** |
 
 ---
 
 ## Bottleneck Analysis (REQUIRED)
 
-**主要瓶颈维度**: Technical Quality
+**Primary Bottleneck Dimension**: Technical Quality
 
-**瓶颈分数**: 7.0/10
+**Bottleneck Score**: 7.5/10
 
-**为什么是瓶颈**:
-The paper's primary weakness is the gap between kernel-level microbenchmarks and end-to-end system validation. While the SDPA/GEMM experiments convincingly demonstrate the dimensional collapse phenomenon and the effectiveness of padding, there is no end-to-end validation showing that dimension repair improves overall inference latency for a real compressed model. The RAP SVD validation shows that the compressed model produces 100% misaligned dimensions (d=102), but the repair benefit is only shown at the kernel level, not in actual inference.
+**Why This is the Bottleneck**:
+The paper's main weakness is the gap between kernel-level results (25-28% speedup) and E2E validation. Section 6.6 now includes RAP SVD E2E results (Table 6), but they show NO benefit (-0.8% prefill, -0.9% decode) because RAP SVD's SDPA operates on projected head_dim=128 (already aligned), not the compressed d=102. The 96.9% misalignment figure comes from theoretical Fisher-information analysis, not actual compressed models.
 
-**突破方向**:
-- **Technical Quality 是瓶颈（< 7.5）→ 需要补充实验数据验证**
-- Specifically needed: E2E inference latency comparison (RAP SVD baseline vs RAP SVD + repair)
-- Show that the 25-28% kernel speedup translates to meaningful E2E improvement
+**Breakthrough Direction**:
+- **Technical Quality is bottleneck -> Need E2E validation on a method where SDPA directly operates on misaligned dimensions**
+- The current RAP SVD E2E shows repair doesn't help when compression uses latent projection
+- Alternative: Strengthen "when applicable" framing with clearer decision tree
 
-**给 Planner 的建议**:
-1. Run E2E inference benchmark with the RAP SVD compressed model (`results/rap_svd_misaligned/llama3_8b_svd_r0.8.pt`)
-2. Apply dimension repair (d=102 → d=104 or d=112) and measure E2E latency improvement
-3. Add one more data point to Table 5 or create a new Table showing E2E comparison
-4. This would elevate Technical Quality to 8.0+ and push overall rating to 7.5+
+**Recommendations for Planner**:
+1. **Option A**: Find/create a compression method where SDPA directly operates on misaligned head_dim (no projection back to 128)
+2. **Option B**: Reframe contribution as "diagnosis + kernel-level solution + architectural guidance" and de-emphasize E2E claims
+3. Add a clearer "Applicability Checklist" for practitioners to determine if repair helps their specific architecture
 
 ---
 
 ## Strengths
 
-1. **Important and practical problem**: The observation that "smaller can be slower" due to dimensional misalignment is counterintuitive and valuable. Compression practitioners often focus solely on accuracy-compression tradeoffs without considering hardware alignment.
+1. **Important and timely problem**: The paper addresses a real performance pitfall that practitioners encounter when deploying compressed LLMs. The "smaller is slower" paradox is counterintuitive and valuable.
 
-2. **Thorough root cause analysis**: The systematic investigation across three layers (PyTorch backend, CUDA kernel, hardware) with controlled experiments (C21, C23) provides strong evidence. The finding that FlashAttention uses internal slow paths (not MATH fallback) corrects a common misconception.
+2. **Thorough root cause analysis**: The three-layer analysis (PyTorch backend, CUDA kernel, hardware) is well-structured. The controlled experiments (C21, C23) effectively isolate causes and quantify impact.
 
-3. **Clear quantitative results**: The paper provides concrete numbers: 88% latency increase for d=107, 58% slowdown from TC misalignment, 50% from vectorized load degradation, 40% from SDPA bandwidth loss. The 6.9x ROI (27.8% speedup / 4.7% overhead) is compelling.
+3. **Rigorous experimental methodology**: The paper uses proper measurement protocols (warmup=50, measure=200, 3 trials, variance reporting). Tables include standard deviations and acknowledge 5-8% measurement variance.
 
-4. **Honest scope statement**: The paper clearly acknowledges that all 24 PaLU checkpoints use 32-multiple alignment and the 96.9% misalignment figure is from theoretical analysis. This transparency strengthens credibility.
+4. **Honest limitations discussion**: Section 6.6 transparently discusses that RAP SVD E2E shows no benefit due to architectural reasons. This intellectual honesty strengthens credibility.
 
-5. **Simple and effective solution**: Zero-padding to aligned dimensions is elegant---bit-exact preservation, no retraining required, and straightforward implementation.
+5. **Practical ROI**: The dimension repair achieves 5.9-6.7x return on investment (speedup per memory cost), compelling for the scenarios where it applies.
 
 ---
 
 ## Weaknesses
 
-1. **E2E validation gap**: The paper's evaluation stops at kernel-level microbenchmarks. While Table 5 and Figure 6 show PaLU compression benefits, they don't demonstrate dimension repair working end-to-end. The Limitations section (Section 6.5) acknowledges this but doesn't provide any E2E numbers even for RAP SVD.
+1. **E2E validation gap (now acknowledged)**: The RAP SVD E2E validation shows no benefit (-0.8% to -0.9%) because SDPA operates on projected aligned dimensions. While honestly disclosed, this limits demonstrated practical impact.
 
-2. **Narrow applicability scope**: The paper's findings only apply to compression methods without alignment constraints. Since all production PaLU checkpoints already enforce 32-multiple alignment, the practical impact is limited to: (a) vanilla SVD, (b) RAP SVD, (c) future methods that relax constraints. This significantly narrows the contribution.
+2. **Theoretical vs. actual misalignment**: The 96.9% misalignment figure comes from Fisher-information theoretical analysis. All 24 PaLU checkpoints use 32-multiple alignment (100% aligned). This distinction, while stated, could confuse readers.
 
-3. **RAP SVD quality concern**: The RAP SVD validation produced d=102 (100% misaligned), but the compression itself degraded perplexity from 11.08 to 92.39---a catastrophic degradation. This raises questions about whether anyone would actually use such a compressed model in practice.
+3. **Limited scope applicability**: The dimension repair benefit is architecture-dependent. For RAP SVD style methods with projection layers, repair provides no benefit at the E2E level.
 
-4. **Missing accuracy validation on tasks**: The paper validates bit-exact output preservation and perplexity, but doesn't show downstream task performance (e.g., MMLU). While zero-padding should be semantically neutral, comprehensive validation would strengthen the claim.
+4. **Perplexity concern**: The RAP SVD model has PPL 92.39 (baseline 11.08), suggesting the compression itself is problematic regardless of alignment.
 
-5. **H100+ generalization unclear**: The experiments are only on A100. Given that H100 has different Tensor Core characteristics (TMA, increased tile sizes), the alignment requirements and speedup magnitudes may differ.
+5. **Missing H100/newer GPU validation**: All experiments are on A100. FlashAttention behavior and alignment requirements may differ on H100/H200.
 
 ---
 
 ## Major Issues (Must Fix)
 
-### M1. E2E Validation Missing
+### M1. RAP SVD E2E Negative Result Framing
 
-**Location**: Section 6 Evaluation
+**Location**: Section 6.6, Table 6
 
-**Issue**: The paper claims 25-30% speedup from dimension repair but only demonstrates this at the kernel level (SDPA/GEMM microbenchmarks). There is no measurement showing that this translates to actual inference latency improvement.
+**Issue**: Table 6 shows repair provides no E2E benefit for RAP SVD (-0.8% prefill, -0.9% decode). While the paper explains this is due to RAP SVD's architecture (SDPA operates on projected head_dim=128), the current presentation buries this important finding in limitations.
 
-**Why it matters**: Kernel-level improvements don't always translate to system-level gains due to Amdahl's law, memory movement costs, and other overheads. Without E2E validation, readers cannot assess the practical benefit.
-
-**Suggested Fix**:
-- Run inference benchmark with RAP SVD compressed model (already generated: `results/rap_svd_misaligned/llama3_8b_svd_r0.8.pt`)
-- Apply dimension repair (d=102 → d=104 or d=112)
-- Measure prefill/decode latency before and after repair
-- Add results to Table 5 or create new table showing: RAP SVD baseline latency, RAP SVD + repair latency, speedup
-
-### M2. Figure 6 Positioning Confusion
-
-**Location**: Section 6.4, Figure 6
-
-**Issue**: Figure 6 shows PaLU compression benefits (11.5x decode speedup), which is orthogonal to the paper's main contribution (dimension repair). This figure can confuse readers into thinking the 11.5x speedup is from dimension repair when it's actually from KV cache compression.
-
-**Why it matters**: The paper's contribution is dimension repair, not compression itself. The current presentation mixes these two orthogonal concepts.
+**Why it matters**: This is actually a valuable scientific finding---it tells practitioners when repair does NOT help. But currently it reads as a failed validation rather than useful architectural guidance.
 
 **Suggested Fix**:
-- Either: Replace Figure 6 with E2E dimension repair validation (RAP SVD before/after)
-- Or: More clearly label Figure 6 as "contextualizing compression benefits (orthogonal to repair)"
-- The title "PaLU compression benefit (orthogonal to repair)" is good but could be more prominent
+- Promote this finding to a main result (not just limitations)
+- Create a clear "Applicability Table" showing: Architecture Type | SDPA head_dim | Repair Benefit?
+- Frame as: "Dimension repair helps when SDPA operates directly on compressed dimensions; does NOT help when architecture projects back to aligned space before attention"
 
-### M3. ROI Inconsistency in Text
+### M2. ROI Number Inconsistency
 
-**Location**: Multiple locations (Abstract, Section 1, Section 5.3, Section 6)
+**Location**: Abstract says "5.9-6.7x", Figure 5 caption says "MINIMAL 5.9x, OPTIMAL 3.5x"
 
-**Issue**: The ROI numbers are inconsistent:
-- Abstract: "6.9x return on investment (speedup per unit memory cost)"
-- Figure 5 caption: "6.9x ROI"
-- Figure 5 annotation box: "Min: 22% / 3.7% = 5.8x ROI" and "Opt: 25% / 7.2% = 3.5x ROI"
-- Section 6.1: "6.9x ROI"
+**Issue**: The ROI numbers are inconsistent across the paper:
+- Abstract: "5.9-6.7x return on investment"
+- Figure 5: "Min: 22%/3.7% = 5.9x ROI", "Opt: 25%/7.2% = 3.5x ROI"
+- Earlier version mentioned 6.9x
 
-The 6.9x doesn't match the 5.8x shown in the figure annotation.
+**Why it matters**: Inconsistent numbers undermine credibility.
 
-**Why it matters**: Inconsistent numbers undermine credibility and confuse readers.
+**Suggested Fix**: Verify all ROI calculations and ensure consistency. Use single consistent formula throughout.
 
-**Suggested Fix**: Reconcile all ROI numbers. If 6.9x is for the best single dimension (d=107: 27.8%/4.7%~5.9x), and 5.8x is the average, clarify this distinction throughout the paper.
+### M3. Figure 6 Oversized and Orthogonal
+
+**Location**: Page 5, Figure 6
+
+**Issue**: Figure 6 shows PaLU compression benefits (11.5x decode speedup), which is orthogonal to the paper's main contribution. The figure takes ~40% of page height for a simple 4-bar comparison.
+
+**Why it matters**: Space is precious in a 6-page paper. This space would be better used for E2E repair validation or expanded limitations discussion.
+
+**Suggested Fix**: Either remove Figure 6 (keep Table 5 only) or reduce to 50% size. Use freed space for more detailed architectural guidance.
 
 ---
 
 ## Minor Issues (Suggested)
 
-### m1. FlashAttention Version Caveat Placement
+### m1. Figure 3 Double Emphasis
 
-**Location**: Section 2.2, Section 4.1
+**Location**: Page 2, Figure 3
 
-**Issue**: The caveat "Results are specific to FlashAttention 2.7.4; future versions may implement internal alignment handling" appears twice. This is good for transparency but somewhat defensive.
+**Issue**: Figure 3 has both "THEORETICAL ANALYSIS" banner inside the figure AND explanatory note in caption. This is redundant.
 
-**Suggestion**: Consolidate into a single prominent note, perhaps in the Limitations section.
+**Suggestion**: Keep the banner (visually prominent) and simplify caption.
 
-### m2. Table 1 MEM_EFF N/A Explanation
+### m2. Figure 5 Label Overlap
 
-**Location**: Table 1, footnote
+**Location**: Page 4, Figure 5
 
-**Issue**: The footnote explaining why MEM_EFFICIENT is N/A for d=107 is helpful but small. Since this is a key finding (MEM_EFFICIENT has strict 8-alignment), it deserves more prominence.
+**Issue**: Labels for d=107, d=117, d=125 cluster in the upper-left region, making them hard to read.
 
-**Suggestion**: Consider adding this finding to the main text in Section 3.3.
+**Suggestion**: Adjust label positions or use leader lines.
 
-### m3. Figure 3 Title Redundancy
+### m3. Page 6 Unused Space
 
-**Location**: Figure 3 caption
+**Location**: Page 6
 
-**Issue**: The figure has both "THEORETICAL ANALYSIS" banner inside the figure and "[Theoretical Analysis]" in the caption. This is redundant.
+**Issue**: Approximately 50% of page 6 appears to be blank space after the conclusion (based on the 7-page PDF with references on page 7).
 
-**Suggestion**: Keep one or the other, not both.
+**Suggestion**: Consider adding a brief discussion of H100 implications or expanded architectural guidance.
 
-### m4. Conclusion Overly Dense
+### m4. References Light
 
-**Location**: Section 8 Conclusion
+**Location**: Page 7
 
-**Issue**: The conclusion packs many numbers into two paragraphs. Some numbers (like "6.9x ROI") are repeated from earlier sections.
+**Issue**: Only 12 references for a systems paper. Typically 20-30 expected for EuroMLSys.
 
-**Suggestion**: Focus on key takeaways and implications rather than repeating all numbers.
+**Suggestion**: Add citations for:
+- More LLM compression methods (LoRA, QLoRA, GGUF)
+- FlashAttention-3 if applicable
+- More GPU optimization work
 
-### m5. Missing Comparison with TensorRT Padding
+### m5. FlashAttention Version Caveat
 
-**Location**: Section 7 Related Work
+**Location**: Section 6.6(2)
 
-**Issue**: The paper mentions TensorRT may perform implicit runtime padding but doesn't compare: Is compile-time repair actually faster than TensorRT's runtime approach?
+**Issue**: The caveat "Results are specific to FlashAttention 2.7.4; future versions may implement internal alignment handling" is important but buried in limitations.
 
-**Suggestion**: Add a brief experimental comparison if possible, or clearly state this as future work.
+**Suggestion**: Consider adding this to Section 2.2 (Background) as well.
 
 ---
 
 ## Questions for Authors
 
-1. **E2E Integration**: You have the RAP SVD compressed model with 100% misaligned dimensions. What prevents you from running E2E inference before/after dimension repair to show the actual latency improvement?
+1. **Alternative architecture**: Can you name a specific, publicly available compression method where dimension repair would provide E2E benefits? Have you tested vanilla SVD without projection?
 
-2. **Perplexity Degradation**: The RAP SVD compression degraded perplexity from 11.08 to 92.39. Do you have any hypothesis for why this compression is so much worse than PaLU? Is there a configuration that produces misaligned dimensions with acceptable perplexity?
+2. **RAP SVD perplexity**: The PPL degradation (11.08 -> 92.39) seems catastrophic. Is there a compression configuration that produces misaligned dimensions with acceptable perplexity?
 
-3. **H100 Generalization**: A100's Tensor Core requires K%16=0 for optimal performance. Does H100 have different alignment requirements? Would the repair strategy need to change?
+3. **H100 generalization**: Do you expect the same alignment requirements on H100? FlashAttention has different optimized dimensions per architecture.
 
-4. **Integration with Compression**: For SVD-based compression, could alignment constraints be incorporated into the rank selection algorithm (like PaLU does) rather than as a post-hoc repair pass?
+4. **Integration path**: Could alignment constraints be added to compression algorithms (like PaLU does) rather than post-hoc repair? What are the tradeoffs?
 
 ---
 
 ## Detailed Comments by Section
 
 ### Abstract
-Good: Concise, clear problem statement, quantitative results.
-Issue: "6.9x return on investment" - make sure this number is consistent with the evaluation section.
+Good summary. The "88% latency increase" and "25-28% kernel-level speedup" are specific and compelling. Consider adding a brief caveat about architecture-dependent E2E applicability.
 
 ### Introduction
-Good: Strong motivating example, clear contribution list.
-Issue: The "96.9% misaligned" claim needs the "theoretical analysis" caveat earlier---currently only appears in Section 3.2.
+Well-motivated with the "smaller is slower" paradox. The scope clarification ("methods that do not include alignment constraints") is important. The motivating example is clear.
 
-### Background
-Good: Clear notation, accurate FlashAttention constraints description.
-Issue: The note about FlashAttention 2.7.4 specificity is good but could be more prominent.
+### Background (Section 2)
+Adequate coverage of Tensor Cores, FlashAttention, and PaLU. The notation paragraph is helpful. Consider explaining why 8/16 alignment matters at hardware level.
 
 ### Dimensional Collapse (Section 3)
-Good: Clear experimental setup, reproducible parameters.
-Good: Table 1 effectively shows backend comparison.
-Issue: Figure 2 shows the "staircase effect" but the Y-axis starts at 0.6ms---this is noted in the caption but could be visually misleading.
+Strong experimental evidence. Table 1 with standard deviations is good practice. The staircase effect in Figure 2 is visually compelling. Section 3.2's scope clarification with "THEORETICAL ANALYSIS" banner is much improved.
 
 ### Root Cause Analysis (Section 4)
-Excellent: Systematic hypothesis testing approach.
-Good: Clear confirmation/rejection of each hypothesis.
-Good: Figure 4 effectively summarizes findings.
+**Strongest section**. The three-layer analysis is systematic. Table 2 effectively summarizes hypothesis status. The impact percentages (58%, 50%, 40%, 5.8%) are actionable.
 
 ### Shape-Aware Compression (Section 5)
-Good: Clean formalization of alignment requirements.
-Good: Bit-exact preservation guarantee is valuable.
-Issue: "MINIMAL" and "OPTIMAL" naming could be more descriptive.
+Clean formalization. The MINIMAL vs. OPTIMAL strategy distinction is practical. Bit-exact output preservation is a key selling point.
 
 ### Evaluation (Section 6)
-Good: Multiple validation angles (padding rescue, GEMM, dimension repair).
-Major Issue: Missing E2E validation as discussed above.
-Issue: Table 4's relationship to Table 3 data inconsistency needs clarification.
+Mixed quality:
+- Sections 6.1-6.3 (kernel-level validation): Strong
+- Section 6.4 (PaLU orthogonal study): Relevant context but takes space
+- Section 6.5 (Accuracy): Good perplexity validation
+- Section 6.6 (Limitations): Honest and valuable, but RAP SVD negative result should be promoted
 
 ### Related Work (Section 7)
-Good: Comprehensive coverage of LLM compression and inference frameworks.
-Good: Table 6 dimension handling comparison is useful.
-Issue: Could discuss alignment-aware compression more (e.g., how PaLU's block_size=32 works).
+Good coverage. Table 7 comparing dimension handling across systems is valuable. Could add discussion of when/why different systems chose their alignment strategies.
 
-### Conclusion
-Good: Summarizes key findings.
-Issue: Very dense, could be more focused.
+### Conclusion (Section 8)
+Appropriately summarizes findings. The "practitioners should verify their compression architecture" advice is important but could be more prominent.
 
 ---
 
-## Visual Observations
+## Visual Observations (REQUIRED)
 
 ### Page-by-Page Observations
 
 **Page 1:**
-- Seen: Title "When Smaller Is Slower: Dimensional Collapse in Compressed LLMs", 5 authors from KAUST and HUMAIN AI, Abstract, Introduction, Figure 1
+- Seen: Title "When Smaller Is Slower: Dimensional Collapse in Compressed LLMs", 5 authors from KAUST and HUMAIN AI, Abstract, Figure 1 (overview diagram), start of Section 1
 - Specific observations:
-  - Title is compelling and clear
-  - Figure 1 is positioned at top-right, takes about 1/3 of the page width
-  - Figure 1 uses blue->red->pink color scheme for (a) and red->green color scheme for (b)
-  - The "+88%" and "+30%" annotations are prominent and readable
-  - Figure 1(a) shows "Original head_dim=128" -> "SVD Compress" -> "Compressed head_dim=107" -> "+88% Latency Increase"
-  - Figure 1(b) shows "d=107 (misaligned) 2.15ms" -> "Zero-Pad to 112" -> "d=112 (8-aligned) 1.49ms" -> "+30% Speedup"
+  - Title is clear and attention-grabbing
+  - Figure 1 has two parts (a) Dimensional Collapse and (b) Dimension Repair
+  - Figure 1(a) shows "Original head_dim=128" -> "SVD Compress" -> "Compressed head_dim=107" with "+88% Latency Increase" in red
+  - Figure 1(b) shows "d=107 (misaligned) 2.15ms" -> "Zero-Pad to 112" -> "d=112 (8-aligned) 1.49ms" with "+30% Speedup" in green
   - Bottom annotations: "107 % 8 != 0 -> GPU alignment violation" and "Bit-exact output preservation"
-  - Abstract is compact, about 7 lines
-  - Keywords: LLM Compression, GPU Optimization, Tensor Core, Memory Alignment
-- Issues: Figure 1 is well-designed overall; the key numbers (+88%, +30%) are visible. Minor: the "Memory: +4.7%" text in Figure 1(b) is smaller than other annotations.
+  - Keywords: "LLM Compression, GPU Optimization, Tensor Core, Memory Alignment"
+- Issues: Figure 1 annotations "107", "+88%", "+30%" are readable. Minor: "Memory: +4.7%" text is slightly smaller.
 
 **Page 2:**
-- Seen: End of Introduction, Section 2 Background (Notation, Tensor Core Alignment, FlashAttention Constraints, Low-Rank Compression), Section 3 Dimensional Collapse (Experiment Setup, Scope and Dimension Distribution), Figure 2 (SDPA latency), Figure 3 (PaLU distribution)
+- Seen: End of Section 1 (Contributions list), Section 2 (Background), Figure 2 (SDPA latency), Figure 3 (Dimension distribution), start of Section 3
 - Specific observations:
-  - Figure 2 shows clear "staircase effect" with green (8-aligned) points lower than red (misaligned)
-  - Figure 2 X-axis: "Head Dimension" range 80-160, Y-axis: "Latency (ms)" range 1.0-3.0
-  - Figure 2 data labels: D=96 (1.14ms), D=107 (2.15ms), D=120 (1.56ms)
-  - Figure 2 legend shows "8-aligned" (green) and "Misaligned" (red)
-  - Figure 3 has brown dashed border with "THEORETICAL ANALYSIS" banner at top in yellow/brown box
-  - Figure 3 subtitle in italics: "(If SVD used optimal ranks without alignment constraints)"
-  - Figure 3 histogram shows distribution concentrated in 115-125 range with percentages: 9%, 6%, 6%, 19%, 9%, 28%, 9%
-  - Figure 3 legend box shows "8-aligned (3.1%)" in green, "Misaligned (96.9%)" in red
-  - Figure 3 info text: "Llama-3-8B Fisher ranks, r=0.8 retention, Total KV heads: 512"
+  - Contribution list uses numbered format (1-5) with bold keywords
+  - Figure 2: X-axis "Head Dimension" 80-160, Y-axis "Latency (ms)" 1.0-3.0
+  - Figure 2 shows "staircase effect" with green (8-aligned) vs red (misaligned) points
+  - Data labels visible: D=96 (1.14ms), D=107 (2.15ms), D=120 (1.56ms)
+  - Figure 3: Histogram with "THEORETICAL ANALYSIS" yellow/brown banner at top
+  - Figure 3 shows distribution concentrated in 115-125 range
+  - Figure 3 legend: "8-aligned (3.1%)" green, "Misaligned (96.9%)" red
   - Green note at bottom: "Note: All 24 production PaLU checkpoints use 32-multiple alignment"
 - Issues:
-  - Figure 2 legend box is large, positioned in lower-left, may partially obscure some data points near d=64
-  - Figure 3 "THEORETICAL ANALYSIS" banner is now prominent with yellow/brown background - good improvement
-  - Figure 3 is visually busy with both the banner and the bottom green note - could simplify
+  - Figure 3 has both banner AND bottom note - slightly redundant but acceptable
+  - Figure 2 Y-axis starts at ~1.0ms not 0 (noted in caption but could mislead)
 
 **Page 3:**
-- Seen: Section 3.3 SDPA Latency vs Head Dimension, Section 3.4 Backend Selection Behavior, Table 1, Section 4 Root Cause Analysis, Sections 4.1-4.3, Figure 4, Table 2
+- Seen: Table 1 (Backend latency), Section 3.4, Section 4 (Root Cause Analysis), Table 2, Figure 4 (Root cause breakdown)
 - Specific observations:
-  - Table 1 shows SDPA backend comparison with d=96,104,107,112,128
-  - Table 1 columns: d, AUTO, FLASH, MEM_EFF, MATH with latency values and std errors
-  - d=107 row is bolded: AUTO=2.14, FLASH=2.14, MEM_EFF=N/A*, MATH=27.0
-  - Footnote: "*MEM_EFFICIENT unavailable: requires strict 8-alignment (d=107 is not 8-aligned)"
-  - Figure 4 horizontal bar chart showing Performance Impact (%) for 4 hypotheses:
-    - Tensor Core (K%16): 58+-4% [Y] Confirmed (red bar)
-    - Vectorized Loads (K%8): 50+-6% [Y] Confirmed (red bar)
-    - SDPA Bandwidth: 40+-5% [Y] Confirmed (red bar)
-    - L2 Cache Sectors: 6+-1% [N] Not Confirmed (gray hatched bar)
-  - Legend shows "Confirmed" (red) vs "Not Confirmed" (gray hatched)
-  - Table 2 shows hardware root cause analysis: Hypothesis/Status/Impact/Root Cause columns
-- Issues:
-  - Figure 4 is clean and effective; the [Y]/[N] labels inside bars are readable
-  - Figure 4 takes about 40% of column width - appropriate for the content
+  - Table 1 columns: d, AUTO, FLASH, MEM_EFF, MATH with values and std errors
+  - d=107 row bolded: AUTO=2.14, FLASH=2.14, MEM_EFF=N/A*, MATH=27.0
+  - Footnote explains MEM_EFFICIENT N/A for non-8-aligned
+  - Figure 4: Horizontal bar chart with 4 hypotheses
+    - "Tensor Core (K%16): 58+-4%" with [Y] Confirmed (red bar)
+    - "Vectorized Loads (K%8): 50+-6%" with [Y] Confirmed (red bar)
+    - "SDPA Bandwidth: 40+-5%" with [Y] Confirmed (red bar)
+    - "L2 Cache Sectors: 6+-1%" with [N] Not Confirmed (gray hatched bar)
+  - Table 2: 4 rows for H1-H4 with Status/Impact/Root Cause columns
+- Issues: Figure 4 is clean and effective, labels readable.
 
 **Page 4:**
-- Seen: Section 5 Shape-Aware Compression (Shape Contract, Dimension Repair), Section 6 Evaluation (Padding Rescue P1, GEMM Alignment, Dimension Repair Validation C4), Table 3, Table 4, Figure 5
+- Seen: Section 5 (Shape-Aware Compression), Table 3 (Padding rescue), Section 6 (Evaluation), Figure 5 (Repair tradeoff), Table 4 (SDPA latency repair)
 - Specific observations:
-  - Table 3 (Padding rescue) shows d=107->112 achieves 1.39x speedup with 4.7% overhead
-  - Table 3: Phys. d | Mem. Ovhd. | Latency | Speedup columns
-  - Table 3 data: 107 (base) 0% 2.064ms 1.00x, 112 4.7% 1.490ms 1.39x, 128 19.6% 1.506ms 1.37x
-  - Figure 5 scatter plot: X-axis "Memory Overhead (%)" range 0-10, Y-axis "Speedup (%)" range -5 to 35
-  - Figure 5 shows two series: Minimal (->8) with blue circles, Optimal (->16) with orange squares
-  - Figure 5 data points labeled: d=107, d=117, d=120, d=125, d=121
+  - Table 3: Phys. d (107, 112, 128) with Mem. Ovhd., Latency, Speedup
+  - d=107 baseline 2.064ms, d=112 achieves 1.39x with 4.7% overhead
+  - Figure 5: Scatter plot X "Memory Overhead (%)" 0-10, Y "Speedup (%)" -5 to 35
+  - Blue circles = Minimal (->8), Orange squares = Optimal (->16)
   - d=120 highlighted with green box "(already aligned)" at position (0, 0)
-  - Diagonal dashed lines show 3x ROI, 6x ROI, 9x ROI reference
-  - Annotation box: "Average (512 heads): Min: 22%/3.7% = 5.8x ROI, Opt: 25%/7.2% = 3.5x ROI"
-  - Table 4 shows repair performance for d=107,114,117,120,121,125 with Original/Minimal/Optimal latencies and delta percentages
+  - Diagonal ROI reference lines: 3x, 6x, 9x
+  - Annotation box: "Average (512 heads): Min: 22%/3.7% = 5.9x ROI, Opt: 25%/7.2% = 3.5x ROI"
+  - Table 4: 6 dimensions with Original/Minimal/Optimal latencies and delta columns
 - Issues:
-  - Figure 5 has overlapping labels in upper region (d=125, d=117, d=107 clustered)
-  - The "Average (512 heads)" box partially overlaps with the d=120 annotation area
-  - d=120 validation point (0% speedup for MINIMAL) is well-highlighted
+  - Figure 5 labels d=107, d=117, d=125 cluster in upper region
+  - d=120 validation point (0% MINIMAL speedup) effectively shows alignment hypothesis
 
 **Page 5:**
-- Seen: Table 5 (PaLU compression benefit), Figure 6 (bar chart), Section 6.4 Orthogonal Study, Section 6.5 Accuracy Preservation, Section 6.6 Limitations, Section 7 Related Work (partial), Table 6
+- Seen: Table 5 (PaLU compression), Figure 6 (E2E bar chart), Table 6 (RAP SVD E2E), Section 6.5-6.6, start of Section 7
 - Specific observations:
-  - Table 5 shows Baseline vs PaLU: Prefill -2.0%, Decode +11.5x
-  - Table 5 caption: "PaLU compression benefit (orthogonal to repair). 11.5x decode speedup from reduced KV cache"
-  - Figure 6: Two side-by-side bar charts (Prefill and Decode)
-  - Prefill chart: Y-axis 0-12000 tok/s, Baseline=9,870 (blue), PaLU=9,672 (orange), annotation "-2.0%" in red
-  - Decode chart: Y-axis 0-1800 tok/s, Baseline=119 (blue), PaLU=1,371 (orange), annotation "11.5x" in green
-  - Figure subtitle: "Llama-3-8B, A100 80GB, B=4, S=2048" in gray italics
-  - Section 6.5 mentions RAP SVD perplexity: baseline 11.08, RAP SVD 92.39, RAP SVD + repair 92.39
-  - Limitations lists 3 points: E2E gap, Scope, Downstream
-  - Table 6 compares dimension handling: FlashAttn-2, vLLM, TensorRT, GPTQ/AWQ, PaLU, RAP SVD, This work
-  - RAP SVD row shows "Vulnerable" in bold
+  - Table 5: Baseline vs PaLU comparison
+    - Prefill: 9870 vs 9672 tok/s (-2.0%)
+    - Decode: 119 vs 1371 tok/s (+11.5x)
+  - Figure 6: Two grouped bar charts (Prefill and Decode)
+    - Prefill Y-axis 0-12000, Baseline=9870 (blue), PaLU=9672 (orange), "-2.0%" red annotation
+    - Decode Y-axis 0-1800, Baseline=119 (blue), PaLU=1371 (orange), "11.5x" green annotation
+    - Subtitle: "Llama-3-8B, A100 80GB, B=4, S=2048"
+  - Table 6: RAP SVD E2E validation (d=102->104)
+    - Prefill: 290.5ms -> 292.9ms (-0.8%)
+    - Decode: 1009 -> 1000 tok/s (-0.9%)
+    - Memory: 15451 -> 15461 MB (+0.1%)
+  - Section 6.6 lists 3 limitations with architecture-dependent explanation
 - Issues:
-  - **Figure 6 is oversized** - takes ~40% of page for simple 4-bar comparison (2+2 bars)
-  - Table 5 and Figure 6 show identical information (redundant)
-  - Figure 6 could be reduced to 60% size or removed entirely, keeping Table 5
+  - **Figure 6 is LARGE** - simple 4-bar comparison (2+2) takes ~40% of page height
+  - Figure 6 is redundant with Table 5 (same data)
+  - Information density is low for the space consumed
 
 **Page 6:**
-- Seen: End of Section 7 Related Work (Positioning paragraph), Section 8 Conclusion
+- Seen: Table 7 (Dimension handling comparison), end of Section 7, Section 8 (Conclusion)
 - Specific observations:
-  - Page is approximately 25% filled, with ~75% blank space below Conclusion
-  - Conclusion is 3 paragraphs, approximately 15-18 lines total
-  - First paragraph: "dimensional collapse" problem definition and root causes (FlashAttention +30-45%, TC 58%, vectorized 50%, L2 5.8%)
-  - Second paragraph: repair solution (25-28% speedup, 3.72% overhead, 6.9x ROI), RAP SVD validation (d=102, 100% misaligned), perplexity preservation
-  - Third paragraph: PaLU orthogonality (11.5x decode), future work (SVD integration, H100+ generalization)
+  - Table 7 compares 7 systems: FlashAttn-2, vLLM, TensorRT, GPTQ/AWQ, PaLU, RAP SVD, This work
+  - "Supported head_dim" column shows different patterns
+  - "Misaligned handling" column: RAP SVD marked "Vulnerable" in bold
+  - "This work" shows "Repair to 8/16-multiple" with "Compile-time fix"
+  - Conclusion is 3 paragraphs summarizing key findings
+  - Limitation noted: "H100+ generalization remains future work"
 - Issues:
-  - **Significant unused space** - approximately 75% of page 6 is blank
-  - This space could accommodate E2E validation results or additional experiments
-  - Could move some Related Work content here or expand Conclusion with discussion
+  - Some whitespace remains after conclusion (acceptable)
+  - References start on page 7
 
 **Page 7:**
-- Seen: References section, 12 references listed in two columns
+- Seen: References section only
 - Specific observations:
-  - References [1]-[12] in ACM Reference Format
+  - 12 references total in ACM format
   - Citations include: FlashAttention [2,3], GPTQ [5], AWQ [6], PaLU [11], RAP [9], vLLM [8], TensorRT [10], SparseGPT [1], MQA [7], GQA [4], StreamingLLM [12]
-  - References page is approximately 30% filled
 - Issues:
-  - 12 references is relatively light for a systems paper; typically 20-30 expected
-  - Could add more related work on LLM compression and GPU optimization
+  - 12 references is light for a systems paper (typically 20-30)
+  - Could add more related work citations
 
 ### Figure-by-Figure Assessment
 
-| Figure | Page | Specific Content Observed | Size | Layout | Issues |
-|--------|------|--------------------------|------|--------|--------|
-| Fig 1 | 1 | Two-part: (a) 128->107->+88% latency with blue/red boxes, (b) 107->112->+30% speedup with red/green boxes. Bottom formulas: "107%8!=0" and "Bit-exact preservation" | Appropriate | Normal | Good overall; "Memory: +4.7%" text slightly small |
-| Fig 2 | 2 | Scatter/line X:80-160 head_dim, Y:1.0-3.0ms latency. Green=8-aligned, Red=misaligned. Labels: D=96(1.14ms), D=107(2.15ms), D=120(1.56ms) | Appropriate | Normal | Legend box large, may obscure low-dim data |
-| Fig 3 | 2 | Histogram 115-125 range, brown dashed border, yellow "THEORETICAL ANALYSIS" banner, green note at bottom. Percentages: 9%,6%,6%,19%,9%,28%,9% | Appropriate | Normal | Visually busy with both banner AND bottom note; could simplify |
-| Fig 4 | 3 | Horizontal bars: TC 58%, Vec 50%, SDPA 40%, L2 6%. Red=Confirmed, Gray=Not. [Y]/[N] labels on bars | Appropriate | Normal | Clean design, labels readable |
-| Fig 5 | 4 | Scatter X:0-10% overhead, Y:-5 to 35% speedup. Blue circles=Minimal, Orange squares=Optimal. ROI lines 3x,6x,9x | Appropriate | Minor overlap | Labels d=107,117,125 clustered; d=120 well-highlighted |
-| Fig 6 | 5 | Two bar charts: Prefill (0-12000 tok/s) and Decode (0-1800 tok/s). Blue=Baseline, Orange=PaLU. -2.0% and 11.5x annotations | **Too large** | Normal | 4 bars taking ~40% page; redundant with Table 5 |
+| Figure | Location | Specific Content Observed | Size Assessment | Layout Assessment | Issues |
+|--------|----------|---------------------------|-----------------|-------------------|--------|
+| Fig 1 | Page 1 | Two-part: (a) SVD->107->+88% latency, (b) 107->112->+30% speedup. Annotations: "107 % 8 != 0", "Bit-exact preservation" | **Appropriate** | Normal | Good overall; "+4.7%" text slightly small |
+| Fig 2 | Page 2 | Line/scatter plot Y:1.0-3.0ms latency, X:80-160 head_dim. Green=8-aligned, Red=misaligned. Labels: D=96(1.14ms), D=107(2.15ms) | **Appropriate** | Normal | Y-axis doesn't start at 0; legend placement okay |
+| Fig 3 | Page 2 | Histogram 115-125 range with "THEORETICAL ANALYSIS" banner. 96.9% misaligned annotation | **Appropriate** | Normal | Banner + bottom note is slightly redundant |
+| Fig 4 | Page 3 | Horizontal bars: TC 58%, Vec 50%, SDPA 40%, L2 6%. [Y]/[N] labels on bars | **Appropriate** | Normal | Clean effective design |
+| Fig 5 | Page 4 | Scatter X:0-10% overhead, Y:-5 to 35% speedup. d=120 highlighted at (0,0). ROI lines 3x,6x,9x | **Appropriate** | Normal | Label clustering in upper-left |
+| Fig 6 | Page 5 | Two bar charts: Prefill 0-12000 tok/s, Decode 0-1800 tok/s. Baseline vs PaLU | **TOO LARGE** | Normal | 4 bars taking ~40% page; redundant with Table 5 |
 
 ### Table Assessment
 
-| Table | Content Observed | Issues |
+| Table | Observed Content | Issues |
 |-------|-----------------|--------|
-| Table 1 | 5 rows (d=96,104,107,112,128), 4 backends (AUTO,FLASH,MEM_EFF,MATH). d=107 bold, N/A for MEM_EFF with footnote | Clear; footnote explains N/A well |
-| Table 2 | 4 hypotheses (H1-H4), Status/Impact/Root Cause columns. 3 Confirmed, 1 Not confirmed | Compact and effective |
-| Table 3 | 3 rows (107,112,128), Mem Ovhd/Latency/Speedup. 112 achieves 1.39x with 4.7% | Clear padding rescue results |
-| Table 4 | 6 dims, Original/Minimal/Optimal latencies, delta columns. d=120 shows 0% MINIMAL gain | Good validation; d=120 confirms alignment hypothesis |
-| Table 5 | 2 rows (Prefill,Decode), Baseline/PaLU/Delta. Decode 11.5x | Clear but redundant with Figure 6 |
-| Table 6 | 7 systems, Supported head_dim/Misaligned handling. "This work" shows compile-time fix | Very useful comparison table |
+| Table 1 | 5 rows (d=96,104,107,112,128), 4 backends. d=107 bold, MEM_EFF=N/A with footnote | Clear and informative |
+| Table 2 | 4 hypotheses H1-H4, Status/Impact/Root Cause. 3 Confirmed, 1 Not | Compact and effective |
+| Table 3 | 3 rows (107,112,128), Mem Ovhd/Latency/Speedup | Clear padding results |
+| Table 4 | 6 dims, Original/Minimal/Optimal latencies, delta columns | Dense but readable |
+| Table 5 | 2 rows (Prefill,Decode), Baseline/PaLU/Delta. 11.5x decode | Redundant with Figure 6 |
+| Table 6 | RAP SVD E2E: Prefill/Decode/Memory, Misaligned/Repaired/Delta | **Shows negative result** - important finding |
+| Table 7 | 7 systems comparison, head_dim support, handling | Very useful comparison |
 
-### Layout Assessment
+### Layout Assessment (REQUIRED)
 
-**整体页面利用率**：
-- Pages 1-5: Well-utilized, appropriate density
-- **Page 6: ~75% unused space** - most significant layout issue
-- Page 7: ~70% empty (acceptable for references)
+**Overall Page Utilization**:
+- Pages 1-4: Good utilization, balanced text and figures
+- Page 5: Figure 6 is disproportionately large for content
+- Page 6: Good utilization with Table 7 and conclusion
+- Page 7: References only, appropriate
 
-**图文冲突检查**：
-- No figures invading text space
-- All captions have adequate spacing
-- No overlap issues detected
+**Figure-Text Conflicts**:
+- No figures invading text space observed
+- All figures have adequate spacing from captions
+- No caption overlap issues detected
 
-**尺寸问题图片列表**：
+**Size Issues List**:
+| Figure | Problem Type | Description | Suggested Modification |
+|--------|-------------|-------------|----------------------|
+| Fig 6 | TOO LARGE | Simple 4-bar comparison (2+2 bars) occupies ~40% page height. Low information density | Reduce to 50-60% current size or remove (keep Table 5 only) |
+| Fig 5 | Minor label overlap | d=107, d=117, d=125 labels cluster | Adjust label positions |
 
-| 图片 | 问题类型 | 具体描述 | 建议修改 |
-|------|---------|---------|---------|
-| Fig 6 | 过大/信息密度低 | 4 bars (2+2) taking ~40% of page; redundant with Table 5; orthogonal to main contribution | Reduce to 60% size or remove; use space for E2E repair results |
-| Fig 3 | 略复杂 | Both "THEORETICAL ANALYSIS" banner AND green note at bottom; visually busy | Keep one emphasis method, remove redundancy |
+**Double-Column Specific Issues**:
+- No column overflow issues
+- Single-column figures fit properly
+- No misaligned cross-column elements
 
 ### Visual Issues Summary
 
-1. **Page 6: ~75% blank space** - Most significant issue; should add E2E validation content or redistribute content
-2. **Figure 6: Oversized** - Simple 4-bar chart occupies ~40% of page 5; redundant with Table 5
-3. **Figure 5: Label clustering** - d=107, d=117, d=125 labels overlap in upper-left region
-4. **Figure 3: Double emphasis** - Both banner and bottom note for "theoretical" - choose one
-5. **Figure 2: Legend placement** - Lower-left legend may obscure some low-dimension data points
-6. **References: Light** - Only 12 references; systems papers typically have 20-30
-7. **ROI inconsistency** - 6.9x in text vs 5.8x in Figure 5 annotation
+**Must list at least 5 visual issues**:
+
+1. **Figure 6 oversized (Page 5)**: The grouped bar chart showing Baseline vs PaLU is simple content (4 numbers total) taking ~40% column height. Information density is very low.
+
+2. **Figure 5 label clustering (Page 4)**: Labels for d=107, d=117, d=125 overlap in the upper-left region, reducing readability.
+
+3. **Figure 3 double emphasis (Page 2)**: Has both "THEORETICAL ANALYSIS" banner AND green "Note:" at bottom. Slightly redundant though acceptable.
+
+4. **Table 6 negative results (Page 5)**: Shows -0.8%, -0.9% results without visual emphasis that this is a key architectural finding (not a failure).
+
+5. **References light (Page 7)**: Only 12 references; systems papers typically have 20-30 citations.
+
+6. **ROI inconsistency**: Numbers vary across paper (5.9x, 6.7x in abstract; 5.9x, 3.5x in Figure 5).
+
+7. **Figure 2 Y-axis starting point**: Starts at ~1.0ms not 0, which exaggerates the visual difference (noted in caption but could mislead).
 
 ---
 
 ## Improvement Checklist for Writer Agent
 
 ### High Priority (Must Fix)
-- [ ] **Add E2E validation**: Run inference with RAP SVD model before/after repair, show latency improvement
-- [ ] **Fix ROI inconsistency**: Reconcile 6.9x vs 5.8x numbers throughout paper
-- [ ] **Utilize Page 6 space**: Add E2E results or redistribute content to fill ~75% blank
-- [ ] **Resize or remove Figure 6**: Redundant with Table 5; could free space for repair validation
+- [ ] **Promote RAP SVD E2E finding**: Currently in limitations; should be promoted as architectural guidance (when repair helps vs. doesn't help)
+- [ ] **Fix ROI inconsistency**: Reconcile 5.9-6.7x (abstract) with 5.9x/3.5x (Figure 5)
+- [ ] **Resize Figure 6**: Reduce to 50% or remove; redundant with Table 5
+- [ ] **Add applicability table**: Create clear table showing Architecture Type | SDPA head_dim | Repair Helps?
 
 ### Medium Priority (Recommended)
-- [ ] **Fix Figure 5 label overlap**: Adjust d=107, d=117, d=125 label positions
-- [ ] **Simplify Figure 3**: Remove either banner or bottom note (keep one emphasis)
-- [ ] **Move Figure 2 legend**: Reposition to top-right to not obscure data
-- [ ] **Add more references**: Consider 5-10 more citations on LLM compression, GPU optimization
+- [ ] **Fix Figure 5 label overlap**: Adjust d=107, d=117, d=125 positions
+- [ ] **Simplify Figure 3**: Keep banner OR bottom note, not both
+- [ ] **Add more references**: Consider 8-10 more citations (target 20-25 total)
+- [ ] **Emphasize Table 6 finding**: This is valuable architectural guidance, not a failure
 
 ### Low Priority (Optional)
-- [ ] **Consolidate FlashAttention version notes**: Merge two mentions into Limitations
-- [ ] **Clarify MINIMAL/OPTIMAL naming**: More descriptive like "8-aligned"/"16-aligned"
-- [ ] **Table 1 footnote**: Consider inline explanation instead of small footnote
+- [ ] **Consolidate FlashAttention caveats**: Mention version limitation prominently in one place
+- [ ] **Consider Table 5 vs Figure 6**: One of these is redundant; pick the better presentation
 
 ---
 
@@ -428,15 +414,14 @@ Issue: Very dense, could be more focused.
 **Confidence Score:** 4/5
 
 **Expertise Areas:**
-- GPU architecture and Tensor Core optimization
-- LLM inference systems (attention mechanisms, KV cache)
-- PyTorch/CUDA performance analysis
-- Academic paper evaluation
+- GPU kernel optimization and Tensor Core programming
+- LLM inference systems and attention mechanisms
+- Systems paper evaluation
 
 **Limitations:**
-- Cannot verify FlashAttention internal kernel dispatch without code inspection
-- Cannot assess H100 generalization without experiments
-- Cannot validate perplexity numbers without reproduction
+- Cannot verify specific FlashAttention source code claims without running experiments
+- Cannot validate numerical results without access to experimental environment
+- paper_example directory was not available for comparison with published work
 
 ---
 
