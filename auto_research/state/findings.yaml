@@ -411,9 +411,98 @@ C5_validation:
       - "运行 E2E benchmark: RAP_SVD vs RAP_SVD+Repair"
       - "测量 speedup 并更新论文 Figure 6"
 
+  - id: "F5.6"
+    date: "2026-01-27"
+    experiment: "M1_E2E_REPAIR (Job 18546)"
+    finding: "RAP SVD E2E 实验部分失败：仅 Prefill 阶段完成，Decode 和 Repair 失败"
+    status: "PARTIALLY_FAILED"
+    evidence_path: "results/rap_svd_e2e/20260127_130226/"
+    confidence: "high"
+    details:
+      job_id: 18546
+      node: "acclnode06"
+      gpu: "A100 80GB PCIe"
+      phases_completed:
+        misaligned_prefill: "6/6 ✅"
+        misaligned_decode: "0/8 ❌"
+        repaired_prefill: "0/6 ❌"
+        repaired_decode: "0/8 ❌"
+      decode_error:
+        type: "TypeError"
+        message: "DynamicCache.__init__() got an unexpected keyword argument 'config'"
+        cause: "transformers 4.39.3 版本的 DynamicCache 不接受 config 参数"
+      repair_error:
+        type: "RuntimeError"
+        message: "The expanded size of the tensor (102) must match the existing size (816)"
+        cause: |
+          apply_dimension_repair() 假设权重形状是 [k_rank, hidden]
+          实际 RAP SVD 权重形状是 [num_heads * k_rank_per_head, hidden] = [8*102, 4096] = [816, 4096]
+          需要按 group-level 处理，而非 per-head
+    fixes_needed:
+      - item: "修复 apply_dimension_repair() 函数"
+        priority: "critical"
+        description: "适配 RAP SVD 的张量布局：[num_heads * k_rank_per_head, hidden]"
+      - item: "修复 DynamicCache 兼容性"
+        priority: "medium"
+        description: "移除 config 参数或条件判断 transformers 版本"
+    supports_claim: "N/A - 实验未完成"
+    paper_section: "Section 5 (E2E Validation)"
+    figure_ref: "Figure 6 (未生成)"
+
+  - id: "F5.7"
+    date: "2026-01-27"
+    experiment: "M1_E2E_REPAIR (Job 18546)"
+    finding: "RAP SVD (d=102, 100%不对齐) Prefill 性能基线数据"
+    status: "COMPLETED"
+    evidence_path: "results/rap_svd_e2e/20260127_130226/misaligned_results.json"
+    confidence: "high"
+    details:
+      model: "Llama-3-8B + RAP SVD (r=0.8)"
+      head_dim: 102
+      alignment: "102 % 8 = 6 (不对齐)"
+      model_size_mb: 15451
+      prefill_results:
+        - config: "batch=1, seq=512"
+          latency_ms: 61.46
+          latency_std: 0.18
+          throughput_tok_s: 8330
+          cv_pct: 0.29
+        - config: "batch=4, seq=512"
+          latency_ms: 210.92
+          latency_std: 1.03
+          throughput_tok_s: 9710
+          cv_pct: 0.49
+        - config: "batch=1, seq=1024"
+          latency_ms: 126.39
+          latency_std: 0.46
+          throughput_tok_s: 8102
+          cv_pct: 0.36
+        - config: "batch=4, seq=1024"
+          latency_ms: 464.85
+          latency_std: 1.08
+          throughput_tok_s: 8811
+          cv_pct: 0.23
+        - config: "batch=1, seq=2048"
+          latency_ms: 290.54
+          latency_std: 0.70
+          throughput_tok_s: 7049
+          cv_pct: 0.24
+        - config: "batch=4, seq=2048"
+          latency_ms: 1134.19
+          latency_std: 0.99
+          throughput_tok_s: 7223
+          cv_pct: 0.09
+      data_quality: "CV < 1% for all configs, data is very stable"
+    key_observation: |
+      Misaligned prefill 数据有效，可作为 baseline。
+      但缺少 repaired 对比数据，无法验证 E2E repair speedup。
+    supports_claim: "Baseline for dimension repair comparison"
+    paper_section: "Section 5 (E2E Validation)"
+    figure_ref: "Figure 6 (待对比数据)"
+
 c5_status_summary:
   date: "2026-01-27"
-  status: "PARTIALLY_COMPLETE - RAP SVD model ready, E2E benchmark pending"
+  status: "BLOCKED - E2E benchmark code needs fixes"
   previous_blocker: |
     所有可用的 PaLU checkpoint（ratio 0.5-0.9）都使用了 32-倍数量化约束，
     维度 100% 对齐。维度坍塌问题不存在于当前可用模型中。
@@ -439,10 +528,45 @@ c5_status_summary:
     ✅ COMPLETED:
     1. 使用 RAP SVD 压缩模型生成不对齐维度 - Job 18533 完成
     2. 验证生成的模型 rank 确实不对齐 - 100% 不对齐 (head_dim=102)
+    3. 运行 E2E benchmark (Job 18546) - 部分完成
 
-    REMAINING:
-    3. 运行 dimension repair 并测量 speedup
-    4. 更新论文 Figure 6 展示 repair 效果
+    ❌ FAILED - 需要修复:
+    4. apply_dimension_repair() 函数 - 张量形状不匹配
+    5. DynamicCache API 兼容性 - transformers 版本问题
+
+    📊 部分成功:
+    - Misaligned prefill 数据有效 (6/6 配置)
+    - 数据稳定性好 (CV < 1%)
+
+    ⏳ REMAINING:
+    6. 修复代码后重新运行 repair benchmark
+    7. 生成 comparison.json 和 latency_plot.pdf
+    8. 更新论文 Figure 6
+
+  # 2026-01-27 M1_E2E_REPAIR 实验记录
+  m1_e2e_experiment:
+    job_id: 18546
+    date: "2026-01-27"
+    status: "PARTIALLY_FAILED"
+    result_path: "results/rap_svd_e2e/20260127_130226/"
+    phases:
+      misaligned_prefill: "SUCCESS - 6/6 configs"
+      misaligned_decode: "FAILED - DynamicCache API"
+      repaired_prefill: "FAILED - tensor shape mismatch"
+      repaired_decode: "NOT_RUN"
+    valid_data:
+      - "misaligned_results.json - prefill 部分"
+    missing_data:
+      - "repaired_results.json"
+      - "comparison.json"
+      - "latency_plot.pdf"
+    errors:
+      decode_error: "DynamicCache.__init__() got unexpected keyword argument 'config'"
+      repair_error: "tensor size mismatch: expected [102, 4096], got [816, 4096]"
+    root_cause: |
+      apply_dimension_repair() 假设 RAP SVD 权重形状是 [k_rank_per_head, hidden]，
+      实际形状是 [num_heads * k_rank_per_head, hidden] = [8 * 102, 4096] = [816, 4096]。
+      需要修改 repair 逻辑按 group-level 处理张量。
 
   # 2026-01-27 M2 实验成功记录
   m2_experiment_success:
@@ -693,6 +817,85 @@ key_insights:
       3. L2 cache sector 浪费（5.8%）不是主因
       4. 解决方案：显式 padding 到 8/16 对齐
       5. 可进入 C3 形式化阶段定义 Shape Contract
+
+  - id: "F5.8"
+    date: "2026-01-27"
+    experiment: "M1_E2E_REPAIR (Job 18549)"
+    finding: "RAP SVD E2E benchmark 完成：Dimension repair 在 RAP SVD 架构下没有带来性能提升"
+    status: "COMPLETED"
+    evidence_path: "results/rap_svd_e2e/20260127_131517/"
+    confidence: "high"
+    details:
+      job_id: 18549
+      node: "acclnode06"
+      gpu: "A100 80GB PCIe"
+      repair_applied:
+        original_dim: 102
+        repaired_dim: 104
+        layers_repaired: "32/32"
+        strategy: "minimal"
+      prefill_results:
+        - config: "batch=1, seq=512"
+          misaligned_ms: 61.29
+          repaired_ms: 63.06
+          speedup_pct: -2.8
+        - config: "batch=4, seq=512"
+          misaligned_ms: 210.68
+          repaired_ms: 216.23
+          speedup_pct: -2.6
+        - config: "batch=1, seq=1024"
+          misaligned_ms: 125.87
+          repaired_ms: 128.61
+          speedup_pct: -2.1
+        - config: "batch=4, seq=1024"
+          misaligned_ms: 464.55
+          repaired_ms: 467.80
+          speedup_pct: -0.7
+        - config: "batch=1, seq=2048"
+          misaligned_ms: 290.47
+          repaired_ms: 292.92
+          speedup_pct: -0.8
+        - config: "batch=4, seq=2048"
+          misaligned_ms: 1134.18
+          repaired_ms: 1134.55
+          speedup_pct: -0.0
+      decode_results:
+        avg_speedup_pct: -0.7
+        max_speedup_pct: -0.0
+      summary:
+        avg_prefill_speedup_pct: -1.5
+        avg_decode_speedup_pct: -0.7
+    key_observation: |
+      **重要发现：RAP SVD 架构下 dimension repair 没有帮助！**
+
+      原因分析：
+      1. RAP SVD 在 latent space (k_rank_per_head=102) 存储压缩表示
+      2. 但 SDPA 实际操作发生在 k_proj_B 投影后的 head_dim=128 空间
+      3. head_dim=128 是完全对齐的，SDPA 不受影响
+      4. Repair 只增加了 latent GEMM 的计算量，没有改善 SDPA 性能
+
+      这是 negative result，但是重要的科学发现！
+    root_cause_analysis: |
+      RAP SVD forward path:
+      1. k_proj_A: hidden -> k_latent (102, MISALIGNED)
+      2. KV cache 存储 k_latent
+      3. k_proj_B: k_latent -> k_states (head_dim=128, ALIGNED)
+      4. SDPA: Q @ K^T @ V (在 head_dim=128 上，ALIGNED)
+
+      维度不对齐只影响 k_proj_A/B 的 GEMM，不影响 SDPA。
+      而 repair 增加了 latent space 的计算和内存开销。
+    implications: |
+      1. 对于 SVD-based 压缩 (RAP SVD)，维度不对齐不影响 SDPA 性能
+      2. Dimension repair 对 RAP SVD 无效，不应作为优化策略
+      3. 论文需要明确 scope：repair 仅适用于直接操作不对齐 head_dim 的场景
+      4. C4 微基准（直接在 SDPA 层测试）仍然有效
+    paper_impact:
+      section: "Section 5 (E2E Validation)"
+      modification_needed: |
+        - 添加 RAP SVD E2E negative result
+        - 明确 dimension repair 的适用场景
+        - 强调 C4 微基准仍是主要证据
+        - 讨论不同压缩架构对维度敏感性的差异
 
 # C1 阶段总结
 C1_summary:

@@ -234,6 +234,134 @@ searches:
       - "引用 NVIDIA 的 tile quantization 解释"
       - "在论文中使用 N=54 vs N=55 类似的具体例子"
 
+  # ===== 2026-01-27 新增：SVD-LLM 方法深入调研 =====
+  - date: "2026-01-27"
+    topic: "related_work_svd_compression"
+    query: "SVD-LLM low-rank compression LLM performance 2024-2025"
+    purpose: "深入了解 SVD-based LLM 压缩方法的最新进展"
+    findings:
+      - title: "SVD-LLM: Truncation-aware SVD for LLM Compression"
+        source: "https://arxiv.org/abs/2403.07378"
+        venue: "ICLR 2025 (also arXiv 2024.03)"
+        relevance: "核心相关工作 - SVD 压缩会产生 irregular dimensions"
+        key_points:
+          - "Data whitening 技术确保 singular values 直接映射到 compression loss"
+          - "Sequential low-rank approximation 补偿 accuracy degradation"
+          - "高压缩率下优于 ASVD 等方法"
+          - "维度 rounding 到 8 的倍数 (遵循 NVIDIA guidelines)"
+
+      - title: "SVD-LLM V2: Optimizing Singular Value Truncation"
+        source: "https://arxiv.org/abs/2503.12340"
+        venue: "NAACL 2025"
+        relevance: "SVD-LLM 的改进版本"
+        key_points:
+          - "计算每个 weight matrix 的 theoretical truncation loss"
+          - "为每个 weight matrix 分配 unique compression ratio"
+          - "解决了 homogeneous compression 导致的高 truncation loss 问题"
+
+      - title: "Fisher-Aligned Subspace Compression (FASC)"
+        source: "https://arxiv.org/abs/2601.07197"
+        venue: "arXiv 2026.01"
+        relevance: "SVD 的替代方法，使用 Fisher information"
+        key_points:
+          - "SVD 假设 activation variance = importance (可能不正确)"
+          - "FASC 使用 gradient information 识别关键维度"
+          - "在 50% rank reduction 下保留 6-8% 更多 accuracy"
+          - "7B 模型可达到 13B 模型的 factual recall"
+
+      - title: "Dobi-SVD: Differentiable SVD for LLM Compression"
+        source: "https://arxiv.org/abs/2502.02723"
+        venue: "arXiv 2025.02"
+        relevance: "可微分 SVD 方法"
+        key_points:
+          - "可微分优化 truncation positions"
+          - "压缩率 0.4 时保持 40% accuracy (ASVD/SVD-LLM 只有 29-31%)"
+
+      - title: "ResSVD: Residual Compensated SVD"
+        source: "https://arxiv.org/abs/2505.20112"
+        venue: "arXiv 2025.05"
+        relevance: "残差补偿 SVD"
+        key_points:
+          - "解决现有方法忽略 residual matrix 的问题"
+          - "减少 truncation loss"
+    action_items:
+      - "在 Related Work 讨论 SVD-LLM, SVD-LLM V2, FASC 等方法"
+      - "强调这些方法关注 accuracy preservation，忽视 GPU 效率问题"
+      - "指出维度 rounding 是 ad-hoc 的，缺乏系统性分析"
+
+  # ===== 2026-01-27 新增：FlashAttention 32 倍数约束确认 =====
+  - date: "2026-01-27"
+    topic: "flashattention_dimension_constraints"
+    query: "FlashAttention head dimension multiple of 32 constraint"
+    purpose: "确认 FlashAttention 对 head_dim 32 倍数的硬性要求"
+    findings:
+      - title: "FlashAttention headdim multiple of 32 error"
+        source: "https://github.com/modelscope/ms-swift/issues/6617"
+        relevance: "关键证据 - FlashAttention 某些构建不支持非 32 倍数 head_dim"
+        key_points:
+          - "错误信息: 'This flash attention build does not support headdim not being a multiple of 32'"
+          - "vLLM 虽然 supposedly 处理任意 head sizes，但 FlashAttention 2.8.3 拒绝非 32 倍数"
+          - "问题发生在 multimodal 模型 (如 Qwen3Omni 的 audio+video 输入)"
+
+      - title: "FlashAttention 64/128 only for non-Tensor Core"
+        source: "https://github.com/ggml-org/llama.cpp/discussions/15650"
+        relevance: "确认 Tensor Core 外的额外限制"
+        key_points:
+          - "'FlashAttention without tensor cores only supports head sizes 64 and 128'"
+          - "非标准维度可能导致 seg fault"
+          - "常见模型 (D 是 2 的幂，< 128) 是设计目标"
+    action_items:
+      - "在论文中明确说明 FlashAttention 的维度约束层级"
+      - "基本支持: head_dim <= 256"
+      - "高效支持: 32 的倍数"
+      - "最优支持: 64 或 128"
+      - "强调 SVD 压缩产生的非标准维度 (如 107) 会触发这些限制"
+
+  # ===== 2026-01-27 新增：LLM 推理优化综述 =====
+  - date: "2026-01-27"
+    topic: "llm_inference_optimization_survey"
+    query: "LLM inference optimization GPU kernel 2024-2025"
+    purpose: "了解 LLM 推理优化领域的最新进展"
+    findings:
+      - title: "A Survey on Inference Engines for Large Language Models"
+        source: "https://arxiv.org/abs/2505.01658"
+        venue: "arXiv 2025.05"
+        relevance: "综合综述，覆盖 25 个开源/商业推理引擎"
+        key_points:
+          - "核心优化: caching, batching, kernel optimization, quantization"
+          - "Kernel fusion 合并 LayerNorm + matmul + activation"
+          - "Continuous batching 和 hybrid batching 提升 decode 效率"
+
+      - title: "FlashDecoding++: Faster LLM Inference"
+        source: "https://proceedings.mlsys.org/paper_files/paper/2024/file/5321b1dabcd2be188d796c21b733e8c7-Paper-Conference.pdf"
+        venue: "MLSys 2024"
+        relevance: "揭示不同 GEMM shapes 需要不同 dataflow"
+        key_points:
+          - "单一静态 dataflow 可导致 50.25% 性能损失"
+          - "异步 softmax + double buffering + 启发式 dataflow"
+          - "NVIDIA GPU 上 4.86x speedup, AMD GPU 上 4.35x speedup"
+
+      - title: "FlashInfer: Efficient Attention Engine"
+        source: "https://homes.cs.washington.edu/~arvind/papers/flashinfer.pdf"
+        venue: "MLSys 2025 (或 arXiv)"
+        relevance: "高效 attention 引擎"
+        key_points:
+          - "JIT compilation 结合 attention variant 和 KV-cache layout"
+          - "长上下文推理延迟显著降低"
+          - "LLM serving 13-17% speedup"
+
+      - title: "NEO: CPU Offloading for Online LLM Inference"
+        source: "http://minlanyu.seas.harvard.edu/writeup/mlsys25.pdf"
+        venue: "MLSys 2025"
+        relevance: "GPU 内存不足时的 offloading 策略"
+        key_points:
+          - "在线推理的 CPU offloading"
+          - "解决 KV cache 线性增长问题"
+    action_items:
+      - "在 Related Work 引用 FlashDecoding++ 说明 GEMM shape 敏感性"
+      - "讨论 FlashInfer 的 JIT 方法作为可能的解决方案"
+      - "强调我们的贡献是第一个系统性分析 SVD 压缩导致的维度问题"
+
 # 需要引用的论文
 papers_to_cite:
   - title: "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
@@ -271,6 +399,31 @@ papers_to_cite:
     authors: "Elias Frantar et al."
     venue: "ICLR 2023"
     relevance: "Baseline quantization method"
+    cited: false
+
+  # 新增论文
+  - title: "SVD-LLM V2: Optimizing Singular Value Truncation for Large Language Model Compression"
+    authors: "Xin Wang et al."
+    venue: "NAACL 2025"
+    relevance: "SVD-LLM 改进版，heterogeneous compression ratios"
+    cited: false
+
+  - title: "FlashDecoding++: Faster Large Language Model Inference on GPUs"
+    authors: "Ke Hong et al."
+    venue: "MLSys 2024"
+    relevance: "说明 GEMM shape 敏感性 - 50% 性能差异"
+    cited: false
+
+  - title: "vLLM: Efficient Memory Management for Large Language Model Serving with PagedAttention"
+    authors: "Woosuk Kwon et al."
+    venue: "SOSP 2023"
+    relevance: "主流推理框架，有 head_dim 白名单约束"
+    cited: false
+
+  - title: "CALDERA: Compressing LLMs using Low Rank and Low Precision Decomposition"
+    authors: "Jiwei Wei et al."
+    venue: "arXiv 2024"
+    relevance: "结合 low-rank 和 quantization"
     cited: false
 
 # 竞争方法对比数据
@@ -311,6 +464,14 @@ competitive_methods:
     dimensional_collapse: true
     note: "同样会产生 irregular dimensions"
 
+  - name: "SVD-LLM V2"
+    type: "Low-rank SVD"
+    compression: "Heterogeneous ratios per layer"
+    speedup: "Better than V1"
+    accuracy_loss: "Lower than V1"
+    dimensional_collapse: true
+    note: "不同层不同压缩率，维度更加多样化"
+
 # 技术文档引用
 technical_references:
   - source: "NVIDIA CUDA C++ Programming Guide"
@@ -346,6 +507,7 @@ technical_references:
       - vLLM/xformers 限制: [64, 80, 96, 112, 128, 256]
       - head_dim > 192 backward 需要 A100+
       - 某些构建要求 head_dim 是 32 的倍数
+      - 非 Tensor Core 路径仅支持 64 和 128
 
   - source: "vLLM Issue #3359"
     url: "https://github.com/vllm-project/vllm/issues/3359"
@@ -386,6 +548,18 @@ pending_questions:
   - question: "Palu 的 group_size=4 如何影响最终维度？"
     status: "pending"
     note: "需要详细分析 Palu 代码"
+
+  - question: "FlashAttention 对非 32 倍数的 head_dim 有什么具体限制？"
+    status: "answered"
+    answer: |
+      1. 某些 FlashAttention 构建版本硬性要求 head_dim 是 32 的倍数
+         错误信息: "This flash attention build does not support headdim not being a multiple of 32"
+      2. 非 Tensor Core 路径 (如 CPU 或老 GPU) 仅支持 head_dim 64 和 128
+         错误信息: "FlashAttention without tensor cores only supports head sizes 64 and 128"
+      3. vLLM 使用白名单: [64, 80, 96, 112, 128, 256]
+    sources:
+      - "https://github.com/modelscope/ms-swift/issues/6617"
+      - "https://github.com/ggml-org/llama.cpp/discussions/15650"
 
 # 关键发现总结
 key_findings:
@@ -463,6 +637,25 @@ key_findings:
       即使 NVIDIA 的生产框架也没有公开的 head_dim 修复策略。
       这进一步支持我们论文的新颖性：首次系统性研究维度修复。
 
+  # ===== 2026-01-27 新增发现 =====
+  - finding: "FlashDecoding++ 发现单一 GEMM dataflow 导致 50% 性能损失"
+    evidence: "不同 GEMM shapes 需要不同 dataflow 策略"
+    implication: |
+      佐证我们的论点：GEMM shape (包括维度) 对性能有显著影响。
+      SVD 压缩改变维度后需要重新考虑最优 dataflow。
+    sources:
+      - "MLSys 2024 FlashDecoding++ paper"
+
+  - finding: "SVD-LLM 系列方法遵循 NVIDIA 对齐指南，但缺乏系统性分析"
+    evidence: |
+      SVD-LLM: "rounding low-rank dimensions to nearest multiple of eight"
+      但没有分析不对齐的性能影响，只是作为最佳实践遵循。
+    implication: |
+      现有 SVD 压缩方法知道需要对齐，但没有量化不对齐的代价。
+      我们的论文首次系统性量化这个问题。
+    sources:
+      - "https://arxiv.org/abs/2405.10616"
+
 # Related Work 段落建议 (回应 Reviewer)
 related_work_suggestions:
   vllm_tensorrt_comparison:
@@ -489,6 +682,27 @@ related_work_suggestions:
       直接回应 Reviewer 关于 "lacks comparison with other dimension handling
       strategies in production inference frameworks" 的问题。
       说明我们的工作是对现有框架 ad-hoc 策略的系统性补充，而非重复。
+
+  svd_compression_methods:
+    topic: "SVD-based LLM Compression Methods"
+    suggested_text: |
+      Recent SVD-based LLM compression methods, including SVD-LLM, SVD-LLM V2,
+      PaLU, and CALDERA, have made significant progress in reducing model size
+      while preserving accuracy. SVD-LLM uses truncation-aware data whitening
+      to minimize compression loss, while PaLU applies group-wise low-rank
+      decomposition to KV-cache with up to 50% compression. However, these
+      methods focus primarily on accuracy preservation and memory reduction,
+      treating dimension alignment as a secondary concern. SVD-LLM follows
+      NVIDIA's guideline to round dimensions to multiples of 8, but without
+      analyzing the performance implications of different alignment choices.
+      Our work reveals that this ad-hoc approach is insufficient: non-aligned
+      dimensions can cause up to 2× performance degradation due to Tensor Core
+      tile quantization and vector load inefficiency, a phenomenon we term
+      "dimensional collapse."
+    key_citations:
+      - "SVD-LLM: Truncation-aware SVD for LLM Compression (ICLR 2025)"
+      - "Palu: KV-Cache Compression with Low-Rank Projection (ICLR 2025)"
+      - "CALDERA: Low Rank and Low Precision Decomposition (arXiv 2024)"
 
 # 最后更新时间
 last_updated: "2026-01-27"
