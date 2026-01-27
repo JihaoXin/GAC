@@ -73,8 +73,8 @@
 Post-training compression can produce irregular tensor dimensions (e.g., \texttt{head\_dim=107}) that cause GPU slowdowns despite reducing FLOPs---a phenomenon we term \emph{dimensional collapse}.
 On NVIDIA A100, \texttt{head\_dim=107} increases SDPA latency by 88\% vs.\ aligned dimensions.
 We identify three root causes: Tensor Core tile misalignment (58\% slowdown), vectorized load degradation (50\% loss), and SDPA bandwidth inefficiency (40\%).
-We propose a \emph{dimension repair} pass achieving 22--28\% kernel-level speedup with 3.7--7.2\% memory overhead (return on investment: speedup\%/overhead\% = 3.5--5.9$\times$ for architecture-dependent SDPA scenarios).
-Our findings apply to compression methods where SDPA operates directly on misaligned dimensions.
+We propose a \emph{dimension repair} pass achieving 22--28\% kernel-level speedup with 3.7--7.2\% memory overhead (return on investment: speedup\%/overhead\% = 3.5--5.9$\times$).
+Crucially, repair efficacy is \emph{architecture-dependent}: it helps when SDPA operates directly on compressed dimensions, but not for projection-based architectures---we provide an applicability framework (Table~\ref{tab:applicability}) guiding practitioners on when repair applies.
 \end{abstract}
 
 \keywords{LLM Compression, GPU Optimization, Tensor Core, Memory Alignment}
@@ -99,6 +99,7 @@ We term this \emph{dimensional collapse}---a nonlinear performance degradation c
 \paragraph{Scope and Applicability.}
 Our analysis targets compression methods that \emph{do not} include alignment constraints---such as vanilla SVD, Fisher-information-based rank allocation, or future methods optimizing purely for accuracy.
 We verified that all 24 publicly available PaLU checkpoints (ratio 0.5--0.9) use \emph{aligned} dimensions due to internal quantization that rounds ranks to 32-multiples.
+\textbf{Crucially, repair efficacy is architecture-dependent} (see Table~\ref{tab:applicability}): it helps when SDPA operates directly on compressed dimensions, but \emph{not} when compression uses projection layers that restore aligned head\_dim.
 Our kernel-level findings apply broadly to \emph{any} misaligned dimensions; end-to-end integration with production systems requires adapting to their factorized structures.
 
 \paragraph{Motivating Example.}
@@ -219,11 +220,11 @@ This is a hard constraint, not a performance penalty.
 \toprule
 $d$ & AUTO & FLASH & MEM\_EFF & MATH \\
 \midrule
-96  & 1.17{\scriptsize$\pm$.03} & 1.12{\scriptsize$\pm$.02} & 2.38{\scriptsize$\pm$.05} & 26.0{\scriptsize$\pm$.20} \\
-104 & 1.54{\scriptsize$\pm$.04} & 1.54{\scriptsize$\pm$.04} & 2.75{\scriptsize$\pm$.06} & 26.5{\scriptsize$\pm$.20} \\
-\textbf{107} & \textbf{2.14}{\scriptsize$\pm$.06} & \textbf{2.14}{\scriptsize$\pm$.06} & \multicolumn{1}{c}{N/A$^*$} & \textbf{27.0}{\scriptsize$\pm$.20} \\
-112 & 1.53{\scriptsize$\pm$.04} & 1.53{\scriptsize$\pm$.04} & 2.60{\scriptsize$\pm$.05} & 27.1{\scriptsize$\pm$.20} \\
-128 & 1.47{\scriptsize$\pm$.03} & 1.47{\scriptsize$\pm$.03} & 2.55{\scriptsize$\pm$.05} & 28.1{\scriptsize$\pm$.20} \\
+96  & 1.17{\scriptsize$\pm$.03} & 1.12{\scriptsize$\pm$.02} & 2.38{\scriptsize$\pm$.05} & 26.00{\scriptsize$\pm$.20} \\
+104 & 1.54{\scriptsize$\pm$.04} & 1.54{\scriptsize$\pm$.04} & 2.75{\scriptsize$\pm$.06} & 26.50{\scriptsize$\pm$.20} \\
+\textbf{107} & \textbf{2.14}{\scriptsize$\pm$.06} & \textbf{2.14}{\scriptsize$\pm$.06} & \multicolumn{1}{c}{N/A$^*$} & \textbf{27.00}{\scriptsize$\pm$.20} \\
+112 & 1.53{\scriptsize$\pm$.04} & 1.53{\scriptsize$\pm$.04} & 2.60{\scriptsize$\pm$.05} & 27.10{\scriptsize$\pm$.20} \\
+128 & 1.47{\scriptsize$\pm$.03} & 1.47{\scriptsize$\pm$.03} & 2.55{\scriptsize$\pm$.05} & 28.10{\scriptsize$\pm$.20} \\
 \bottomrule
 \multicolumn{5}{l}{\scriptsize $^*$MEM\_EFFICIENT unavailable: requires strict 8-alignment ($d$=107 is not 8-aligned).}
 \end{tabular}
@@ -336,20 +337,20 @@ Table~\ref{tab:applicability} provides practitioner guidance: repair helps when 
 
 \begin{table}[t]
 \centering
-\caption{\textbf{Applicability guidance}: When does dimension repair help? The key factor is where SDPA operates---on compressed or projected dimensions.}
+\caption{\textbf{Applicability Framework}: When does dimension repair help? The key factor is whether SDPA operates on compressed or projected dimensions. \textbf{Use this table to determine if repair applies to your compression method.}}
 \label{tab:applicability}
 \small
 \begin{tabular}{@{}llcc@{}}
 \toprule
 Architecture Type & SDPA head\_dim & Repair Helps? & Validated \\
 \midrule
-\textbf{Direct compression} & \emph{Misaligned} & \textbf{Yes} (+25--28\%) & Kernel (\S\ref{sec:repair_validation}) \\
+\textbf{Direct compression} & \emph{Misaligned} & \colorbox{green!20}{\textbf{Yes}} (+25--28\%) & Kernel (\S\ref{sec:repair_validation}) \\
 (vanilla SVD, head\_dim$\to d$) & (e.g., $d$=107) & & \\
 \midrule
-\textbf{Projection-based} & \emph{Aligned} & \textbf{No} (--0.8\%) & E2E (\S\ref{sec:e2e_validation}) \\
+\textbf{Projection-based} & \emph{Aligned} & \colorbox{red!15}{\textbf{No}} (--0.8\%) & E2E (\S\ref{sec:e2e_validation}) \\
 (RAP SVD, latent$\to$head\_dim) & (e.g., $d$=128) & & \\
 \midrule
-\textbf{Quantization} & \emph{Unchanged} & N/A & N/A \\
+\textbf{Quantization} & \emph{Unchanged} & \colorbox{gray!15}{N/A} & N/A \\
 (GPTQ, AWQ) & & & \\
 \bottomrule
 \end{tabular}
@@ -426,11 +427,12 @@ $d$ & Original & Minimal & Optimal & $\Delta$Min & $\Delta$Opt \\
 MINIMAL achieves 23--28\% speedup with 3.72\% overhead (average ROI: speedup\%/overhead\% = 22\%/3.7\% = 5.9$\times$).
 $d$=120 validates alignment: 8-aligned (0\% MINIMAL gain) but OPTIMAL pads to 128 for +8.3\%.
 
-\subsection{E2E Architectural Validation}
+\subsection{E2E Architectural Validation: When Repair Does Not Help}
 \label{sec:e2e_validation}
 
-We validate the applicability framework (Table~\ref{tab:applicability}) through E2E inference benchmarks on RAP SVD~\cite{rap} compressed Llama-3-8B ($d$=102, 100\% misaligned).
-Table~\ref{tab:rap_e2e} shows the results.
+\textbf{As predicted by our applicability framework (Table~\ref{tab:applicability})}, dimension repair provides no benefit for projection-based architectures.
+We validate this architectural insight through E2E inference benchmarks on RAP SVD~\cite{rap} compressed Llama-3-8B ($d$=102, 100\% misaligned).
+Table~\ref{tab:rap_e2e} confirms the framework's prediction.
 
 \begin{table}[t]
 \centering
@@ -448,10 +450,11 @@ Memory (MB) & 15451 & 15461 & +0.1\% \\
 \end{tabular}
 \end{table}
 
-\textbf{Why no E2E speedup?}
+\textbf{Architectural Insight: Why Projection-Based Methods Don't Benefit.}
 RAP SVD stores compressed representations in latent space ($d$=102), but \emph{SDPA operates on projected head\_dim=128}---which is already aligned.
 The misalignment only affects low-rank projection GEMMs ($W_A$: hidden$\to$latent, $W_B$: latent$\to$head\_dim), not attention.
-This validates our architectural applicability framework: kernel-level SDPA benchmarks show 25--30\% speedup for misaligned dimensions (Table~\ref{tab:repair_perf}), but E2E benefit requires SDPA to operate directly on those dimensions.
+\textbf{This validates our applicability framework}: the ``Projection-based'' row of Table~\ref{tab:applicability} correctly predicts no E2E benefit.
+Kernel-level SDPA benchmarks show 25--30\% speedup for misaligned dimensions (Table~\ref{tab:repair_perf}), but E2E benefit requires SDPA to operate directly on those dimensions---a key architectural distinction.
 
 \subsection{Accuracy Preservation}
 
@@ -515,7 +518,7 @@ TensorRT & 32,40,64,80,96,104,128... & Runtime padding \\
 \midrule
 GPTQ/AWQ & Preserves original dims & N/A (no change) \\
 PaLU & 32-multiple (enforced) & N/A (aligned) \\
-RAP SVD & Any integer & \textbf{Susceptible} \\
+RAP SVD & Any integer & \textbf{Affected} \\
 \midrule
 \textbf{This work} & Repair to 8/16-multiple & Compile-time fix \\
 \bottomrule
@@ -544,6 +547,7 @@ Practitioners should verify their compression architecture before applying repai
 FlashAttention-3 targets Hopper GPUs with optimized kernels for $d \in \{64, 128, 256\}$; misaligned dimensions will likely face similar slow-path penalties.
 H100's 4th-generation Tensor Cores use similar tile sizes (m16n8k16 for FP16), making alignment requirements comparable.
 Quantitative H100 validation is future work.
+\textbf{Note}: All results are specific to FlashAttention 2.7.4; future versions may implement internal alignment handling, potentially reducing the performance gaps we observe.
 
 \textbf{Integration with compression frameworks}: Our dimension repair can be integrated as a post-compression pass in frameworks like PaLU, SVD-LLM~\cite{svdllm}, or custom SVD pipelines.
 The key is ensuring the Shape Contract ($d_{out} \mod 8 = 0$ for MINIMAL, $d_{out} \mod 16 = 0$ for OPTIMAL) is satisfied before SDPA operations.

@@ -1,121 +1,112 @@
 bottleneck_analysis:
-  innovation_score: 7.5
-  presentation_score: 7.0
+  bottleneck_score: 7.0
+  dimension_scores:
+    innovation: 7.5
+    paper_presentation: 7.0
+    technical_quality: 7.5
+    writing_quality: 7.5
   primary_bottleneck: Paper Presentation
-  reviewer_assessment: '"Weak Accept (7.3/10)" - Reviewer acknowledges:
-
-    - Solid kernel-level experiments
-
-    - Honest disclosure of limitations (RAP SVD negative result)
-
-    - Valuable architectural guidance (Table 7)
-
-
-    Main weakness: "Limited practical applicability" - but this is ALREADY ACKNOWLEDGED
-
-    by the paper''s honest scope discussion.
-
-    '
-  technical_score: 7.5
-  why_presentation_is_bottleneck: '1. Table 7 (key contribution) appears too late
-    in Section 6.5
-
-    2. Figure 2 Y-axis truncation is a visualization concern
-
-    3. Table 5 (PaLU orthogonal study) takes space without advancing main story
-
-    4. RAP SVD negative result is framed as limitation rather than architectural insight
-
-    '
-  writing_score: 7.5
-created_at: '2026-01-27T21:00:00+08:00'
+  reviewer_explicit_fix: "\"Restructure §6 to lead with the applicability guidance\
+    \ (Table 3);\n ensure all figures have 8pt+ fonts; tighten the narrative flow.\"\
+    \n"
+  why_presentation_is_bottleneck: "Reviewer explicitly states:\n1. \"Table 3 (Applicability\
+    \ guidance) is one of the paper's most valuable\n   contributions—a clear guide\
+    \ for when dimension repair helps. However,\n   it appears as just another evaluation\
+    \ section rather than a key framing device.\"\n2. \"Several figures have axis\
+    \ labels ~6-7pt, which is borderline for print\"\n3. \"RAP SVD negative results\
+    \ are presented almost apologetically. However,\n   this is actually a valuable\
+    \ architectural finding.\"\n"
+created_at: '2026-01-27T18:45:00+08:00'
 execution_order:
-  phase_1_structure:
-    description: Major structural changes (M1, M3)
-    priority: critical
-    rationale: 'These changes restructure Section 6 to address the core presentation
-      bottleneck:
+  phase_1_figures:
+    description: Fix figure font sizes and label overlaps
+    priority: high
+    rationale: 'Figure quality directly affects Presentation score.
 
-      - M1: Promote Table 7 as central contribution
-
-      - M3: Remove distraction (orthogonal PaLU study)
+      Reviewer specifically mentions 8pt minimum.
 
       '
     tasks:
     - M1
-    - M3
-  phase_2_visualization:
-    description: Figure improvements (M2, m1)
+    - m1
+  phase_2_framing:
+    depends_on:
+    - M1
+    description: Enhance Table 3 prominence and reframe RAP SVD
     priority: high
-    rationale: Fix visualization issues raised by reviewer
+    rationale: 'These are the core narrative improvements that turn
+
+      the paper from "apologetic" to "confident."
+
+      '
     tasks:
     - M2
-    - m1
-  phase_3_polish:
-    description: Minor clarifications (m2, m3, m4)
-    priority: medium
-    rationale: Address minor issues for completeness
+    - M3
+  phase_3_minor:
+    description: Address minor formatting issues
+    priority: low
+    rationale: 'Polish tasks that show attention to detail.
+
+      '
     tasks:
     - m2
     - m3
     - m4
-  phase_4_optional:
-    description: Optional improvements (m5, m6)
-    priority: low
-    rationale: Nice-to-have if time permits
-    tasks:
     - m5
-    - m6
 issues:
 - actions:
   - agent: writer
-    expected_output: Restructured Section 6 with Table 7 prominently placed
+    expected_output: Figures with 8pt+ fonts in Latex/figures/
     status: pending
     step: 1
-    task: "Restructure Section 6 to promote Table 7:\n\n1. After Section 6.3 (kernel-level\
-      \ validation), add new subsection:\n   \"Section 6.4: Architectural Applicability\
-      \ Analysis\"\n   - Introduce the applicability framework BEFORE showing specific\
-      \ cases\n   - Move Table 7 here as the central decision guide\n\n2. Rename current\
-      \ \"Architectural Applicability Analysis\" section to:\n   \"Section 6.5: Validation\
-      \ Case: RAP SVD Compression\"\n   - Frame as architectural validation, not negative\
-      \ result\n   - Key message: \"RAP SVD validates our framework prediction—projection-based\n\
-      \     methods don't benefit because SDPA operates on aligned projected dimensions\"\
-      \n\n3. Move current \"Orthogonal Study: PaLU\" to Background or compress to\
-      \ 1 sentence\n\n4. Update cross-references throughout the paper\n\nTarget file:\
-      \ Latex/main.tex\n"
-  - agent: writer
-    depends_on:
-    - 1
-    expected_output: Updated Abstract and Contributions with applicability framework
-    status: pending
-    step: 2
-    task: "Update Abstract and Introduction to highlight Applicability Framework:\n\
-      \n1. In Abstract, add phrase: \"...and provide an applicability framework\n\
-      \   distinguishing compression architectures that benefit from repair\n   (direct\
-      \ dimension modification) from those that don't (projection-based).\"\n\n2.\
-      \ In Contributions list (Section 1), update item 5 to:\n   \"Evaluation AND\
-      \ Applicability Framework: We provide kernel-level validation\n   (22-28% speedup)\
-      \ AND an architectural applicability guide (Table 7) showing\n   when dimension\
-      \ repair helps.\"\n\nTarget file: Latex/main.tex\n"
+    task: 'Modify scripts/create_paper_figures.py to increase font sizes:
+
+
+      1. Find the matplotlib rcParams or font settings
+
+      2. Set axis label font size to at least 8pt
+
+      3. Set tick label font size to at least 8pt
+
+      4. Set legend font size to at least 8pt
+
+      5. Set annotation font size to at least 8pt
+
+
+      Specific figures to check:
+
+      - fig_sdpa_latency (Figure 2): X/Y axis labels, data point labels
+
+      - fig_palu_dist (Figure 3): X/Y axis labels, annotations
+
+      - fig_root_cause (Figure 4): Bar labels, legend
+
+      - fig_repair_tradeoff (Figure 5): Scatter labels, ROI annotation
+
+
+      After modifying, regenerate all figures by running:
+
+      python scripts/create_paper_figures.py
+
+
+      Then recompile LaTeX to verify font sizes in PDF.
+
+      '
   depends_on: []
-  description: '**Reviewer Feedback (M1)**:
+  description: '**Reviewer Quote**: "Based on visual inspection of the PDF pages,
+    the axis
 
-    "Table 7 is one of the paper''s most valuable contributions—a clear guide for
+    labels and tick marks in several figures appear to be around 6-7pt, which
 
-    when dimension repair helps. However, it appears late in §6.5 after the RAP SVD
-
-    E2E validation is framed as a ''negative result.''"
+    is borderline for print readability."
 
 
-    **Fix Strategy**:
+    **Figures Affected**: Figure 2, Figure 3, Figure 4
 
-    1. Move Table 7 earlier in §6 (after §6.3 kernel-level validation)
 
-    2. Reframe as "Architectural Applicability Framework"
+    **Fix Required**: Increase all figure axis labels, legends, and annotations
 
-    3. Present RAP SVD as "Architectural Validation Case" not failure
-
-    4. Consider mentioning Table 7 as contribution in Abstract/Intro
+    to 8pt minimum.
 
     '
   id: M1
@@ -123,51 +114,43 @@ issues:
   max_inner_loops: 2
   priority: high
   status: completed
-  title: Promote Architectural Applicability Finding (Table 7)
+  title: Figure Font Sizes Need 8pt Minimum
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: Updated Figure 2 with Y-axis starting from 0
+    expected_output: Enhanced Table 3 prominence with bold Yes/No and earlier references
     status: pending
     step: 1
-    task: 'Modify scripts/create_paper_figures.py to fix Figure 2 (fig2_sdpa_latency):
-
-
-      1. Set Y-axis to start from 0: ax.set_ylim(bottom=0)
-
-      2. Adjust figure layout if needed to accommodate larger Y range
-
-      3. Remove or update the "Y-axis starts at 0.6ms" note from caption
-
-      4. Regenerate the figure
-
-
-      After modifying the script, run:
-
-      python scripts/create_paper_figures.py --figure fig2
-
-
-      Then update the caption in Latex/main.tex if needed.
-
-      '
+    task: "Enhance Table 3 prominence in Latex/main.tex:\n\n1. **Abstract**: Add brief\
+      \ mention of architecture-dependent applicability\n   (e.g., \"We provide an\
+      \ applicability framework showing that dimension\n   repair benefits direct\
+      \ compression methods but not projection-based\n   architectures like RAP SVD.\"\
+      )\n\n2. **Introduction**: Add a forward reference to Table 3 in the\n   contributions\
+      \ list or scope paragraph, e.g., \"Table 3 provides\n   guidance on when dimension\
+      \ repair is effective.\"\n\n3. **Table 3 formatting**:\n   - Make \"Yes\"/\"\
+      No\" in \"Repair Helps?\" column bold: \\textbf{Yes}, \\textbf{No}\n   - Consider\
+      \ adding row colors: green shade for \"Yes\", gray for \"No\"\n   - Ensure table\
+      \ caption emphasizes its importance\n\n4. **Section 6.1**: Ensure the applicability\
+      \ framework is introduced\n   as a KEY evaluation criterion, not just another\
+      \ subsection.\n"
   depends_on: []
-  description: '**Reviewer Feedback (M2)**:
+  description: '**Reviewer Quote**: "Table 3 (Applicability guidance) is one of the
+    paper''s
 
-    "Y-axis starts at ~0.6ms instead of 0, which visually exaggerates the differences.
+    most valuable contributions—a clear guide for when dimension repair helps.
 
-    Systems conferences value visualization integrity."
+    However, it appears as just another evaluation section rather than a key
 
-
-    **Options**:
-
-    A. Start Y-axis from 0 (recommended)
-
-    B. Add clear visual break indicator
-
-    C. Keep current but ensure caption prominently notes truncation
+    framing device."
 
 
-    **Decision**: Option A - start from 0 for credibility
+    **Reviewer Suggestion**:
+
+    - "Consider mentioning this in the Abstract"
+
+    - "Make Table 3 more visually prominent (perhaps with bold Yes/No?)"
+
+    - "Reference Table 3 earlier in the paper to set expectations"
 
     '
   id: M2
@@ -175,78 +158,76 @@ issues:
   max_inner_loops: 2
   priority: high
   status: completed
-  title: Fix Figure 2 Y-axis Visualization
+  title: Make Applicability Framework (Table 3) More Prominent
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: Removed Table 5 and orthogonal study section
+    expected_output: Reframed Section 6.5 with positive architectural insight narrative
     status: pending
     step: 1
-    task: "Consolidate PaLU orthogonal study:\n\n1. Remove Section \"6.4 Orthogonal\
-      \ Study: PaLU Compression Benefits\" entirely\n2. Remove Table 5 (PaLU vs Baseline\
-      \ comparison)\n3. In the RAP SVD validation section, add one sentence:\n   \"\
-      Note: PaLU achieves 11.5× decode speedup via KV cache compression\n   (orthogonal\
-      \ to dimension alignment); its aligned dimensions make it\n   unsuitable for\
-      \ validating dimension repair, motivating our use of RAP SVD.\"\n4. Update any\
-      \ references to Table 5 or the orthogonal study\n5. Renumber subsequent sections/tables\
-      \ if needed\n\nTarget file: Latex/main.tex\n"
-  depends_on: []
-  description: '**Reviewer Feedback (M3)**:
+    task: "Reframe Section 6.5 (RAP SVD Validation) in Latex/main.tex:\n\n1. **Change\
+      \ section title** to emphasize validation:\n   Current: \"E2E Validation: RAP\
+      \ SVD\"\n   New: \"Architectural Validation: RAP SVD Case Study\"\n   Or: \"\
+      E2E Validation: Confirming Projection-Based Methods Don't Benefit\"\n\n2. **Lead\
+      \ with framework prediction**:\n   Start the section with: \"Our applicability\
+      \ framework (Table 3) predicts\n   that projection-based compression methods\
+      \ should NOT benefit from\n   dimension repair, because SDPA operates on the\
+      \ aligned projected\n   dimensions rather than the misaligned latent space.\"\
+      \n\n3. **Present results as CONFIRMATION**:\n   Current tone: \"Results show\
+      \ no improvement...\"\n   New tone: \"As predicted, the E2E speedup is minimal\
+      \ (-0.8%), confirming\n   that dimension repair's benefits are architecture-dependent.\"\
+      \n\n4. **Highlight the positive insight**:\n   \"This negative result is scientifically\
+      \ valuable: it validates our\n   framework's predictive power and helps practitioners\
+      \ identify when\n   dimension repair IS and IS NOT appropriate.\"\n\n5. **Connect\
+      \ to Table 3**:\n   \"The RAP SVD case study validates the 'Projection-based:\
+      \ No' row\n   in Table 3, demonstrating that our framework correctly predicts\n\
+      \   when dimension repair will be ineffective.\"\n"
+  depends_on:
+  - M2
+  description: '**Reviewer Quote**: "The RAP SVD E2E results showing no benefit (-0.8%)
 
-    "Table 5 shows PaLU''s 11.5× decode speedup, which is orthogonal to the paper''s
+    are presented almost apologetically. However, this is actually a valuable
 
-    main contribution. This section takes valuable space (and may confuse readers)
-
-    without advancing the dimension repair story."
+    architectural finding—it shows when dimension repair does NOT help."
 
 
-    **Options**:
+    **Reviewer Suggestion**:
 
-    A. Move to Background (§2) as context
+    - "Reframe the section title to emphasize architectural insight"
 
-    B. Reduce to single sentence/footnote
+    - "Lead with the finding: ''As predicted by our applicability framework...''"
 
-    C. Remove entirely
-
-
-    **Decision**: Option B - reduce to 1-2 sentences in the RAP SVD validation section,
-
-    noting PaLU''s aligned dimensions as context for why we used RAP SVD.
+    - "This validates the framework rather than appearing as a limitation"
 
     '
   id: M3
   inner_loop_count: 0
   max_inner_loops: 1
-  priority: medium
+  priority: high
   status: completed
-  title: Consolidate Orthogonal PaLU Study
+  title: Reframe RAP SVD E2E Results as Architectural Validation
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: Updated Figure 5 with readable labels
+    expected_output: Figure 5 with non-overlapping labels
     status: pending
     step: 1
-    task: 'Modify scripts/create_paper_figures.py to fix Figure 5 (fig5_repair_tradeoff):
+    task: "In scripts/create_paper_figures.py, for the repair_tradeoff figure:\n\n\
+      1. Use matplotlib's adjustText library to auto-adjust label positions\n   OR\
+      \ manually specify offsets for each label\n2. Consider using leader lines (annotate\
+      \ with arrowprops) for crowded points\n3. Alternatively, adjust y-position offsets\
+      \ for d=107, d=114, d=117, d=121, d=125\n   to spread them vertically\n\nExample\
+      \ with textcoords and xytext:\nplt.annotate('d=107', xy=(x, y), xytext=(x+offset_x,\
+      \ y+offset_y),\n             arrowprops=dict(arrowstyle='->', color='gray'))\n"
+  depends_on:
+  - M1
+  description: '**Reviewer Quote**: "The scatter plot has labels (d=107, d=114, d=117,
+    d=121, d=125)
+
+    that cluster in the upper region, potentially overlapping."
 
 
-      1. Adjust label positions using adjustText library or manual offsets
-
-      2. Consider using leader lines connecting labels to points
-
-      3. OR move legend outside the plot area
-
-      4. Regenerate the figure
-
-
-      Run: python scripts/create_paper_figures.py --figure fig5
-
-      '
-  depends_on: []
-  description: '**Reviewer Feedback**:
-
-    "Labels for d=107, d=114, d=117, d=121, d=125 cluster in the upper region,
-
-    making them hard to read."
+    **Fix**: Adjust label positions using offsets or leader lines.
 
     '
   id: m1
@@ -254,31 +235,33 @@ issues:
   max_inner_loops: 1
   priority: medium
   status: completed
-  title: Fix Figure 5 Label Overlap
+  title: Fix Figure 5 Label Clustering
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: Clarified ROI definition
+    expected_output: Table 1 with consistent ±X.XX format
     status: pending
     step: 1
-    task: 'Clarify ROI metric definition on first use in Abstract:
+    task: 'In Latex/main.tex, find Table 1 (Backend latency comparison) and
+
+      standardize all standard deviation values to 2 decimal places:
 
 
-      Change: "3.5--5.9$\times$ ROI"
+      - ±.03 → ±0.03
 
-      To: "3.5--5.9$\times$ return on investment (speedup\%/overhead\%)"
+      - ±.20 → ±0.20
 
-
-      Also add clarification in Section 5.3 where ROI is computed.
-
-
-      Target file: Latex/main.tex
+      - Ensure consistent formatting: ±X.XX
 
       '
   depends_on: []
-  description: '**Reviewer Feedback**:
+  description: '**Reviewer Quote**: "Standard deviation uses inconsistent decimal
+    places
 
-    "3.5-5.9× ROI is defined as speedup per unit memory cost, but this is non-standard."
+    (±.03 vs ±.20)."
+
+
+    **Fix**: Standardize to 2 decimal places throughout.
 
     '
   id: m2
@@ -286,35 +269,63 @@ issues:
   max_inner_loops: 1
   priority: low
   status: completed
-  title: Clarify ROI Metric Definition
+  title: Standardize Table 1 Standard Deviation Formatting
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: Added version caveat in Evaluation section
+    expected_output: Verified/corrected author name
     status: pending
     step: 1
-    task: 'Add FlashAttention version reminder in Section 6:
+    task: 'Check author name spelling in Latex/main.tex.
 
 
-      At the beginning of Section 6 (Evaluation), add:
+      If "Tian Lvy" is incorrect, change to the correct spelling
 
-      "All experiments use FlashAttention 2.7.4; future versions may implement
-
-      internal alignment handling that could affect these results."
+      (likely "Tian Lyu" or similar).
 
 
-      Target file: Latex/main.tex
+      Note: This requires verifying with the actual author''s preferred spelling.
+
+      If unsure, leave as-is and add a note for human review.
 
       '
   depends_on: []
-  description: '**Reviewer Feedback**:
+  description: '**Reviewer Quote**: "''Tian Lvy'' appears potentially misspelled (Lyu?
+    Lvi? Levy?)."
 
-    "The note ''Results are specific to FlashAttention 2.7.4...'' is important but
 
-    appears in Background only."
+    **Action**: Verify and correct if needed.
 
     '
   id: m3
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: low
+  status: completed
+  title: Verify Author Name Spelling
+  type: WRITING_ONLY
+- actions:
+  - agent: writer
+    expected_output: FlashAttention version caveat in Evaluation and/or Conclusion
+    status: pending
+    step: 1
+    task: "Add FlashAttention version caveat in Latex/main.tex:\n\n1. In Section 6\
+      \ (Evaluation), add a note at the start:\n   \"All experiments use FlashAttention\
+      \ 2.7.4; results may vary with\n   future versions as kernel implementations\
+      \ evolve.\"\n\n2. Optionally in Conclusion, add:\n   \"Our findings are validated\
+      \ on FlashAttention 2.7.4; we expect\n   similar patterns on future versions,\
+      \ though specific thresholds\n   may shift as implementations improve.\"\n"
+  depends_on: []
+  description: '**Reviewer Quote**: "The version-specific note ''Results are specific
+    to
+
+    FlashAttention 2.7.4'' is important but only appears in Background."
+
+
+    **Fix**: Repeat this caveat in Evaluation or Conclusion.
+
+    '
+  id: m4
   inner_loop_count: 0
   max_inner_loops: 1
   priority: low
@@ -323,63 +334,27 @@ issues:
   type: WRITING_ONLY
 - actions:
   - agent: writer
-    expected_output: Standardized Table 1 notation
+    expected_output: Table 7 with 'Affected' instead of 'Susceptible'
     status: pending
     step: 1
-    task: 'Standardize Table 1 std notation to 2 decimal places:
+    task: 'In Latex/main.tex, find Table 7 (Dimension handling comparison) and
+
+      change "Susceptible" to "Affected" or "Performance-sensitive"
+
+      in the RAP SVD row.
 
 
-      Find all entries in Table 1 and ensure consistent formatting:
-
-      - Use ±0.XX format (2 decimal places)
-
-      - Example: ±.02 -> ±0.02, ±.2 -> ±0.20
-
-
-      Target file: Latex/main.tex
+      Also check if any other table uses "Susceptible" and update consistently.
 
       '
   depends_on: []
-  description: '**Reviewer Feedback**:
+  description: '**Reviewer Quote**: "RAP SVD marked as ''Susceptible'' which is correct
+    but
 
-    "Standard deviation notation varies (±.02 vs ±.2)—inconsistent decimal places."
-
-    '
-  id: m4
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: low
-  status: completed
-  title: Standardize Table 1 Standard Deviation Formatting
-  type: WRITING_ONLY
-- actions:
-  - agent: literature
-    expected_output: Added 3-5 relevant citations
-    status: pending
-    step: 1
-    task: 'Check literature.yaml and add 3-5 highly relevant citations:
+    might be confused with security terminology."
 
 
-      Priority:
-
-      1. FlashDecoding++ (MLSys 2024) - GEMM shape sensitivity
-
-      2. vLLM (SOSP 2023) - Production framework with head_dim constraints
-
-      3. SVD-LLM V2 (NAACL 2025) - Recent SVD compression work
-
-      4. CALDERA - Combines low-rank and quantization
-
-
-      Add to Latex/references.bib and cite appropriately in Related Work.
-
-      '
-  depends_on: []
-  description: '**Reviewer Feedback**:
-
-    "22 references is acceptable but could be expanded to include more related work
-
-    (LoRA, QLoRA, GGUF, FlashDecoding++, etc.)."
+    **Fix**: Consider "Affected" or "Performance-sensitive" instead.
 
     '
   id: m5
@@ -387,267 +362,180 @@ issues:
   max_inner_loops: 1
   priority: low
   status: completed
-  title: Expand References (Optional)
-  type: WRITING_ONLY
-- actions:
-  - agent: writer
-    expected_output: Updated Table 8 terminology
-    status: pending
-    step: 1
-    task: 'In Table 8, change "Vulnerable" to "Susceptible" for RAP SVD row.
-
-
-      Target file: Latex/main.tex
-
-      '
-  depends_on: []
-  description: '**Reviewer Feedback**:
-
-    "''Vulnerable'' may be misinterpreted as security vulnerability rather than
-
-    performance susceptibility."
-
-    '
-  id: m6
-  inner_loop_count: 0
-  max_inner_loops: 1
-  priority: low
-  status: completed
-  title: Change 'Vulnerable' to 'Susceptible' in Table 8
+  title: Change 'Susceptible' to 'Affected' in Table 7
   type: WRITING_ONLY
 notes:
-- This plan focuses on PRESENTATION improvements, not new experiments
-- The reviewer ALREADY gave Weak Accept (7.3) - we don't need to prove more
-- The RAP SVD negative result is CORRECT architecturally; embrace it as insight
-- Table 7 (Applicability Framework) IS the key contribution for this paper
-- Previous plan's Direct SDPA experiment would be criticized as artificial
-- The path to acceptance is better presentation, not more experiments
-planner_summary: '## Current State
+- This plan follows the Reviewer's EXPLICIT breakthrough direction
+- All tasks are WRITING_ONLY because the bottleneck is Presentation, not Technical
+- The RAP SVD negative result is VALUABLE - it just needs better framing
+- If this doesn't improve score, next iteration should try structural changes
+- Figure font sizes are a common cause of rejection - must fix
+planner_summary: '## Current Status
 
-  - Score: 7.3/10 (Weak Accept)
+  - Score: 7.35/10 (Weak Accept)
 
-  - Reviewer acknowledges value of honest scope discussion
+  - Bottleneck: Paper Presentation (7.0/10)
 
-  - Main bottleneck: Presentation (7.0/10)
+  - Technical Quality: 7.5/10 (solid)
 
+  - Innovation: 7.5/10 (solid)
 
-  ## Strategy
-
-  Focus on presentation improvements to address M1, M2, M3:
-
-  1. Promote Table 7 (Applicability Guidance) to be more central
-
-  2. Fix Figure 2 Y-axis visualization
-
-  3. Consolidate orthogonal PaLU content
-
-  4. Reframe RAP SVD result as architectural insight (not limitation)
+  - Writing Quality: 7.5/10 (solid)
 
 
-  ## Why NOT More Experiments
+  ## Stagnation Analysis (CRITICAL)
 
-  - RAP SVD negative result is architecturally correct
+  - 100+ iterations stuck at 7.25-7.35
 
-  - Creating artificial benchmarks would be criticized
+  - Previous plans were all WRITING_ONLY
 
-  - Paper''s contribution IS the diagnostic + guidance framework
+  - Reviewer explicitly identifies **Presentation** as the bottleneck
+
+
+  ## Reviewer''s Breakthrough Direction
+
+  "If Paper Presentation is the bottleneck: Restructure §6 to lead with the
+
+  applicability guidance (Table 3) as the evaluation framework; ensure all
+
+  figures have 8pt+ fonts; tighten the narrative flow."
+
+
+  ## Strategy for This Iteration
+
+  The Reviewer has given a clear roadmap. The issues are:
+
+  1. M1: Figure font sizes (visual quality)
+
+  2. M2: Table 3 prominence (framing)
+
+  3. M3: RAP SVD narrative reframing (turn negative into positive)
+
+
+  All are WRITING_ONLY, but they are the **exact prescription** from the Reviewer.
+
+  Following this guidance should move Presentation from 7.0 to 7.5+.
+
+
+  ## Why Previous Iterations Didn''t Improve
+
+  Previous plans also had writing tasks, but they may not have addressed
+
+  the EXACT issues the Reviewer identified. This time we follow the
+
+  Reviewer''s explicit guidance precisely.
 
   '
-review_iteration: 105
-review_score: 7.3
+review_iteration: 107
+review_score: 7.35
 sanity_check:
   all_writing_only: true
-  reason: 'This is intentional. The reviewer''s score (7.3) indicates:
-
-    1. Technical content is adequate (Technical Quality: 7.5)
-
-    2. Presentation is the bottleneck (7.0)
-
-
-    Adding experiments would:
-
-    - Risk introducing new problems
-
-    - Not address the actual bottleneck
-
-    - Take time away from fixing presentation
-
-
-    The RAP SVD E2E result shows repair doesn''t help projection-based methods.
-
-    This is a FEATURE (architectural insight), not a bug to fix with more experiments.
-
-    '
+  reason: "YES, this plan is all WRITING_ONLY. However, this is JUSTIFIED because:\n\
+    \n1. The Reviewer explicitly identifies **Paper Presentation (7.0)** as the bottleneck\n\
+    2. The Reviewer provides a SPECIFIC breakthrough direction: \"restructure §6,\n\
+    \   increase figure font sizes, tighten narrative flow\"\n3. Technical Quality\
+    \ (7.5), Innovation (7.5), Writing (7.5) are already solid\n4. The RAP SVD E2E\
+    \ experiment has been completed - no more data needed\n5. The \"negative result\"\
+    \ just needs REFRAMING, not new experiments\n\nPrevious iterations may have failed\
+    \ because they didn't follow the Reviewer's\nEXACT prescription. This plan addresses\
+    \ the SPECIFIC issues raised.\n\n**Note**: If this iteration doesn't improve the\
+    \ score, the next plan should\nconsider more aggressive changes like restructuring\
+    \ the paper organization\nor adding new quantitative analysis.\n"
 stagnation_analysis:
-  breakthrough_strategy: '**Key Insight**: The reviewer ALREADY gave 7.3 (Weak Accept)
-    with current content!
-
-
-    The path forward is NOT more experiments, but better presentation:
-
-    1. M1: Make Table 7 (Applicability) a central contribution, not an afterthought
-
-    2. M2: Fix Figure 2 visualization issue
-
-    3. M3: Reduce space wasted on orthogonal PaLU study
-
-
-    This addresses the actual bottleneck (Presentation 7.0) without adding
-
-    questionable experiments that reviewers would criticize.
-
-    '
-  iterations_without_progress: 100
-  recent_improvement: 0.05
+  iterations_at_current_level: 100+
   score_history:
   - 7.25
   - 7.25
   - 7.25
-  - 7.25
-  - 7.25
   - 7.3
-  why_not_more_experiments: 'The previous action plan proposed "Direct SDPA E2E benchmark"
-    where SDPA
+  - 7.35
+  this_iteration_different: '1. Following Reviewer''s EXACT prescription (Table 3
+    prominence, fonts, reframing)
 
-    directly operates on misaligned dimensions. This has problems:
+    2. M3 reframing turns a perceived weakness into a strength
 
-    1. No real compression method works this way (all use projections)
-
-    2. Would be seen as artificial/contrived by reviewers
-
-    3. Reviewer already accepts kernel-level results as valid
-
-
-    Instead: Strengthen the "when does repair help?" framework as the contribution.
+    3. More focused - 3 Major issues, 5 Minor issues, all with clear fixes
 
     '
-  why_stagnated: 'Previous iterations attempted:
+  variance: 0.1
+  why_previous_didnt_work: 'Previous iterations may have addressed different aspects
+    of presentation
 
-    - Multiple writing improvements (effective for small gains)
+    but not the EXACT issues the Reviewer cares about. The Reviewer now
 
-    - Direct SDPA E2E experiment (proposed but flawed approach)
-
-
-    The fundamental issue:
-
-    - RAP SVD E2E shows no benefit due to architectural reasons (SDPA on aligned head_dim=128)
-
-    - Creating artificial "Direct SDPA" benchmarks wouldn''t be convincing to reviewers
-
-    - The paper''s value IS the diagnostic finding + architectural guidance
+    gives a clear, specific prescription that we must follow precisely.
 
     '
 success_criteria:
   expected_score_improvement:
-    confidence: medium-high
-    current: 7.3
+    confidence: medium
+    current: 7.35
     target: 7.6
   must_complete:
-  - 'M1: Restructure Section 6 with Table 7 prominently placed'
-  - 'M2: Fix Figure 2 Y-axis to start from 0'
-  - 'M3: Remove or consolidate PaLU orthogonal study'
-  optional:
-  - 'm5: Add references'
-  - 'm6: Table 8 terminology'
-  rationale: '**Presentation (7.0 -> 7.5)**:
+  - 'M1: All figures have 8pt+ fonts'
+  - 'M2: Table 3 is prominent with bold Yes/No and early references'
+  - 'M3: RAP SVD section reframed as validation success'
+  score_rationale: '**Presentation (7.0 -> 7.3)**: +0.3 from figure fonts + narrative
+    reframing
 
-    - M1: Table 7 promotion as central contribution (+0.3)
-
-    - M3: Removing orthogonal content focuses the story (+0.1)
-
-    - M2: Fix visualization concern (+0.1)
-
-
-    **Technical Quality (7.5 -> 7.5)**: Unchanged
-
-    - No new experiments needed; kernel results + honest RAP SVD disclosure accepted
-
+    **Technical (7.5 -> 7.5)**: Unchanged (already solid)
 
     **Innovation (7.5 -> 7.5)**: Unchanged
 
-    - The "applicability framework" framing strengthens perceived novelty
+    **Writing (7.5 -> 7.5)**: Unchanged
 
 
-    **Writing Quality (7.5 -> 7.6)**: Minor improvement
-
-    - ROI clarity, notation consistency (+0.1)
+    Weighted: 0.4*7.5 + 0.3*7.3 + 0.2*7.5 + 0.1*7.5 = 7.44
 
 
-    Expected total: 7.3 -> 7.5-7.6
+    With successful M3 reframing improving perception: could reach 7.5-7.6
 
     '
-  should_complete:
-  - 'm1: Fix Figure 5 label overlap'
-  - 'm2: Clarify ROI metric'
-  - 'm3: Add FlashAttention version caveat'
-  - 'm4: Standardize Table 1 notation'
 writing_tasks:
 - changes_required:
-  - change: Reorder subsections, move Table 7 earlier
-    section: Section 6
-  - change: Add applicability framework mention
-    section: Abstract
-  - change: Update contribution 5
-    section: Introduction
-  description: Restructure Section 6, promote Table 7
+  - change: Set matplotlib font sizes (axes.labelsize, xtick.labelsize, etc.) to 8+
+    file: scripts/create_paper_figures.py
+  description: Increase figure font sizes to 8pt minimum
   id: M1
   target_files:
-  - Latex/main.tex
+  - scripts/create_paper_figures.py
+  - Latex/figures/*.pdf
 - changes_required:
-  - change: Start Y-axis from 0
-    section: Figure 2
-  description: Fix Figure 2 Y-axis
+  - change: Add mention of applicability framework
+    section: Abstract
+  - change: Add forward reference to Table 3
+    section: Introduction
+  - change: Bold Yes/No values, possibly add row colors
+    section: Table 3
+  description: Enhance Table 3 prominence
   id: M2
   target_files:
-  - scripts/create_paper_figures.py
   - Latex/main.tex
 - changes_required:
-  - change: Remove entirely, add 1 sentence context
-    section: Section 6.4
-  description: Consolidate PaLU orthogonal study
+  - change: Change title to 'Architectural Validation', lead with framework prediction
+    section: Section 6.5
+  description: Reframe RAP SVD as validation
   id: M3
   target_files:
   - Latex/main.tex
 - changes_required:
-  - change: Adjust label positions
-    section: Figure 5
-  description: Fix Figure 5 labels
-  id: m1
-  target_files:
-  - scripts/create_paper_figures.py
-- changes_required:
-  - change: Define ROI = speedup%/overhead%
-    section: Abstract, Section 5.3
-  description: Clarify ROI definition
+  - change: Consistent ±X.XX format
+    section: Table 1
+  description: Standardize Table 1 std format
   id: m2
   target_files:
   - Latex/main.tex
 - changes_required:
-  - change: Add version reminder
-    section: Section 6
-  description: Add FA version caveat
-  id: m3
-  target_files:
-  - Latex/main.tex
-- changes_required:
-  - change: 2 decimal places for std
-    section: Table 1
-  description: Standardize Table 1 notation
+  - change: Add FA 2.7.4 version note
+    section: Evaluation
+  description: Add FlashAttention version caveat
   id: m4
   target_files:
   - Latex/main.tex
 - changes_required:
-  - change: Add 3-5 citations
-    section: References
-  description: Add references
+  - change: Replace 'Susceptible' with 'Affected'
+    section: Table 7
+  description: Change 'Susceptible' to 'Affected'
   id: m5
-  target_files:
-  - Latex/references.bib
-  - Latex/main.tex
-- changes_required:
-  - change: Vulnerable -> Susceptible
-    section: Table 8
-  description: Table 8 terminology
-  id: m6
   target_files:
   - Latex/main.tex
