@@ -1,16 +1,16 @@
 best_score: 7.6
 expected_changes: {}
 issue_history:
-  M1: 13
-  M2: 13
-  M3: 13
-  M4: 13
-  m1: 13
-  m2: 13
-  m3: 13
-  m4: 13
-  m5: 13
-  m6: 13
+  M1: 15
+  M2: 15
+  M3: 15
+  M4: 15
+  m1: 15
+  m2: 15
+  m3: 15
+  m4: 15
+  m5: 15
+  m6: 15
   m7: 1
 issue_repair_methods:
   M1_SCOPE_CLARIFICATION:
@@ -34,8 +34,8 @@ last_issues:
 - M3
 - m3
 - m6
-last_repair_iteration: 2
-last_updated: '2026-01-28T11:03:13.098542'
+last_repair_iteration: 3
+last_updated: '2026-01-28T11:03:52.432442'
 repair_effective: false
 scores:
 - 7.35
