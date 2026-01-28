@@ -1,22 +1,28 @@
 best_score: 7.6
 expected_changes: {}
 issue_history:
-  M1: 21
-  M2: 21
-  M3: 21
-  M4: 21
-  m1: 21
-  m2: 21
-  m3: 21
-  m4: 21
-  m5: 21
-  m6: 21
+  M1: 23
+  M2: 23
+  M3: 23
+  M4: 23
+  m1: 23
+  m2: 23
+  m3: 23
+  m4: 23
+  m5: 23
+  m6: 23
   m7: 1
 issue_repair_methods:
   M1_SCOPE_CLARIFICATION:
   - WRITING_ONLY
+  M1_SCOPE_FINAL_CHECK:
+  - WRITING_ONLY
+  M2_E2E_VALIDATION_CHECK:
+  - WRITING_ONLY
   M2_POSITIVE_E2E:
   - EXPERIMENT_REQUIRED
+  M3_FIGURE_CODE_ANALYSIS:
+  - FIGURE_CODE_REQUIRED
   M3_FIGURE_SIZE_LATEX:
   - FIGURE_CODE_REQUIRED
   M4_TABLE3_VISUAL:
@@ -24,6 +30,8 @@ issue_repair_methods:
   MINOR_BATCH:
   - WRITING_ONLY
   VISIBILITY_PACKAGE:
+  - WRITING_ONLY
+  m4_SUMMARY_BOX_CHECK:
   - WRITING_ONLY
 last_issues:
 - m2
@@ -36,8 +44,8 @@ last_issues:
 - M2
 - M1
 - m5
-last_repair_iteration: 5
-last_updated: '2026-01-28T16:08:30.048299'
+last_repair_iteration: 1
+last_updated: '2026-01-28T17:03:44.005278'
 repair_effective: false
 scores:
 - 7.35

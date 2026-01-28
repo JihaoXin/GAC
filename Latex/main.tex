@@ -143,7 +143,7 @@ This paper makes the following contributions:
 \begin{enumerate}
   \item \textbf{Measurement \& Diagnosis}: We systematically measure the performance impact of irregular dimensions across GEMM and SDPA, providing the first comprehensive quantification of dimensional collapse (\S\ref{sec:phenomenon}).
   \item \textbf{Root Cause Analysis}: We identify three primary causes across three layers: Tensor Core misalignment (58\%), vectorized load degradation (50\%), and SDPA bandwidth inefficiency (40\%)---while disconfirming L2 cache (5.8\%) as a significant factor (\S\ref{sec:causes}).
-  \item \textbf{✓ Validated Applicability Framework}: We provide practitioner guidance (Table~\ref{tab:applicability}) predicting when dimension repair helps. The framework's predictive power is \textbf{experimentally validated}: direct SDPA benchmarks show \textbf{+86.9\% speedup} (positive validation, Table~\ref{tab:direct_sdpa}), while RAP SVD experiments confirm \textbf{--0.8\%} (negative validation, as predicted for projection-based architectures, Table~\ref{tab:rap_e2e}). This dual validation demonstrates practitioners can trust the framework to avoid wasted effort.
+  \item \textbf{Validated Applicability Framework}: We provide practitioner guidance (Table~\ref{tab:applicability}) predicting when dimension repair helps. The framework's predictive power is \textbf{experimentally validated}: direct SDPA benchmarks show \textbf{+86.9\% speedup} (positive validation, Table~\ref{tab:direct_sdpa}), while RAP SVD experiments confirm \textbf{--0.8\%} (negative validation, as predicted for projection-based architectures, Table~\ref{tab:rap_e2e}). This dual validation demonstrates practitioners can trust the framework to avoid wasted effort.
   \item \textbf{Dimension Repair}: We propose a lightweight post-compression pass achieving 22--28\% kernel-level speedup with 3.7--7.2\% memory overhead (ROI: 3.5--5.9$\times$) when applicable (\S\ref{sec:solution}, \S\ref{sec:eval}).
 \end{enumerate}
 
@@ -359,7 +359,7 @@ Table~\ref{tab:applicability} provides practitioner guidance: repair helps when 
 \begin{table}[t]
 \centering
 \setlength{\tabcolsep}{5pt}
-\caption{\textbf{★ KEY CONTRIBUTION: Applicability Framework (Experimentally Validated).} Predicts dimension repair effectiveness based on compression architecture. \textbf{Validated}: Direct compression shows \textbf{+86.9\% speedup} (\S\ref{sec:e2e_validation}, Table~\ref{tab:direct_sdpa}), while projection-based shows \textbf{--0.8\%} (Table~\ref{tab:rap_e2e})---exactly as predicted. \textbf{Practitioners: Consult this table before applying repair.}}
+\caption{\textbf{KEY CONTRIBUTION: Applicability Framework (Experimentally Validated).} Predicts dimension repair effectiveness based on compression architecture. \textbf{Validated}: Direct compression shows \textbf{+86.9\% speedup} (\S\ref{sec:e2e_validation}, Table~\ref{tab:direct_sdpa}), while projection-based shows \textbf{--0.8\%} (Table~\ref{tab:rap_e2e})---exactly as predicted. \textbf{Practitioners: Consult this table before applying repair.}}
 \label{tab:applicability}
 \fbox{\begin{tabular}{@{}p{2.9cm}p{1.9cm}cc@{}}
 \toprule
@@ -462,7 +462,7 @@ $d$ & Original (ms) & Minimal (ms) & Optimal (ms) & $\Delta$Min & $\Delta$Opt \\
 MINIMAL achieves 23--28\% speedup with 3.72\% overhead (average ROI: speedup\%/overhead\% = 22\%/3.7\% = 5.9$\times$).
 $d$=120 validates alignment: 8-aligned (0\% MINIMAL gain) but OPTIMAL pads to 128 for +8.3\%.
 
-\subsection{✓ Framework Validation: Positive (+87\%) and Negative (--0.8\%) Cases}
+\subsection{Framework Validation: Positive (+87\%) and Negative (--0.8\%) Cases}
 \label{sec:e2e_validation}
 
 A key contribution of our applicability framework (Table~\ref{tab:applicability}) is its ability to predict repair efficacy \emph{before} implementation. We validate the framework with \emph{two} complementary experiments: (1)~direct SDPA testing where repair should help, and (2)~RAP SVD where it should not.
