@@ -1,8 +1,9 @@
 # Paper Review: When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
 
 **Target Venue:** EuroMLSys (SIGPLAN format, 6 pages main content, references and appendix unlimited)
-**Review Date:** 2026-01-28
+**Review Date:** 2026-01-28 (Updated)
 **Reviewer:** Paper Reviewer Agent
+**Paper Version:** 8-page version (6 main + 2 references)
 
 ---
 
@@ -13,6 +14,8 @@ This paper identifies and systematically studies "dimensional collapse" - a coun
 The paper provides a thorough root cause analysis identifying three primary factors: Tensor Core tile misalignment (58% slowdown), vectorized load degradation (50% throughput loss), and SDPA bandwidth inefficiency (40% loss), while disconfirming L2 cache waste (5.8%) as a significant factor. A key contribution is the applicability framework (Table 3) that correctly predicts when dimension repair helps (direct compression) versus when it doesn't (projection-based architectures like RAP SVD).
 
 The proposed dimension repair solution achieves 22-28% kernel-level speedup with 3.7-7.2% memory overhead when applicable. The paper is well-positioned as a diagnostic study with practical guidance for compression method designers, though the end-to-end validation is limited due to most production checkpoints already enforcing alignment internally.
+
+**Note on Current Version (8 pages)**: The paper now extends to 8 pages including references. Page 7 contains substantial conclusion content including H100 generalization discussion, software version notes, and integration guidance. Page 8 is dedicated to references (~30 citations).
 
 ---
 
@@ -36,33 +39,38 @@ The paper makes a solid contribution to understanding GPU performance cliffs in 
 | Writing Quality | 10% | 7.5/10 | 0.75 |
 | **Total** | 100% | - | **7.35/10** |
 
+**Score Breakdown Rationale:**
+- Technical Quality (7.5): Strong root cause analysis, but E2E validation gap for positive cases
+- Paper Presentation (7.0): Good overall, but figures could be more compact; Table 3 needs prominence
+- Innovation (7.5): Novel observation, practical framework, but limited real-world applicability
+- Writing Quality (7.5): Clear and well-organized, appropriate length
+
 ---
 
 ## Bottleneck Analysis (REQUIRED)
 
-**Main Bottleneck Dimension**: Paper Presentation
+**Main Bottleneck Dimension**: Technical Quality (specifically E2E Validation)
 
-**Bottleneck Score**: 7.0/10
+**Bottleneck Score**: 7.5/10
 
 **Why This is the Bottleneck**:
-The paper's technical content is solid (7.5) and the innovation is reasonable (7.5), but the presentation holds back the overall impact. Specifically:
+The paper's presentation has improved with the 8-page version (page 7 now well-utilized). The primary bottleneck is now the **Technical Quality**, specifically:
 
-1. **Figure sizing issues**: Several figures are larger than their information content warrants (especially Fig 5 and Fig 6)
-2. **Information density imbalance**: Some pages have dense text while others have sparse figures
-3. **Table 3 visual hierarchy**: The most important contribution (applicability framework) could be more visually prominent
-4. **Page 7 nearly empty**: The last page of main content has only 2 short paragraphs, wasting space that could strengthen the evaluation
+1. **No positive E2E validation**: RAP SVD experiment shows -0.8% (no benefit), which validates the framework's prediction but doesn't demonstrate practical impact
+2. **Theoretical vs. practical gap**: The 96.9% misalignment is theoretical; all production PaLU checkpoints are aligned
+3. **Limited applicability demonstration**: No end-to-end speedup shown for the "applicable" scenario (direct compression)
 
 **Breakthrough Direction**:
-- If Paper Presentation is the bottleneck (< 7.5) -> **Need to improve figure sizing and page utilization**
-- Compress figures 5 and 6 to free up ~0.5 pages
-- Use recovered space to strengthen E2E validation discussion or add more architectural analysis
-- Improve Table 3's visual prominence as the key contribution
+- If Technical Quality is the bottleneck (7.5) -> **Need positive E2E experiment data**
+- Create vanilla SVD compressed model without alignment constraints
+- Demonstrate E2E speedup with dimension repair on applicable architecture
+- Or strongly reframe as "diagnostic + guidance paper" rather than "solution paper"
 
 **Advice for Planner**:
-1. Reduce Figure 5 and Figure 6 sizes by 30-40%
-2. Consider combining Table 5 and Table 6 or making them more compact
-3. Move some content from page 7 to utilize space better
-4. Add architectural diagram showing why RAP SVD doesn't benefit from repair (currently only explained in text)
+1. **Priority 1**: Implement vanilla SVD compression (no alignment) to create truly misaligned model
+2. **Priority 2**: Run E2E benchmark showing repair speedup on this model
+3. **Priority 3**: If experiments not feasible, strengthen the "diagnostic contribution" framing
+4. **Optional**: Improve Table 3 visual prominence as the key practitioner guidance
 
 ---
 
@@ -119,19 +127,20 @@ The paper's technical content is solid (7.5) and the innovation is reasonable (7
 - (b) Reframe the contribution more clearly as "kernel-level diagnostic + guidance framework" rather than "end-to-end solution"
 - (c) Add explicit statement: "E2E validation of positive cases remains future work due to lack of vanilla SVD compressed checkpoints"
 
-### M3. Improve Space Utilization - Page 7 Nearly Empty
+### M3. Figure Sizing and Information Density
 
-**Location**: Page 7 (main content), Figures 5-6
+**Location**: Figures 5-6
 
-**Issue**: Page 7 has only ~15 lines of text (H100 considerations, Integration). Meanwhile, Figures 5 and 6 are larger than their information content warrants.
+**Issue**: Figure 5 (scatter plot with 6 data points) and Figure 6 (4-bar chart) occupy full column width but have relatively low information density for the space used.
 
-**Why it matters**: In a 6-page paper, wasting half a page is significant. The sparse page 7 makes the paper feel unfinished.
+**Why it matters**: In a space-constrained paper, figures should have proportional information density.
 
 **Suggested Fix**:
-- Reduce Figure 5 and 6 sizes by 30-40%
-- Move some Related Work discussion to page 7
-- Add an architectural diagram explaining why projection-based methods don't benefit from repair (currently only text explanation)
-- Consider expanding H100 discussion with more specific predictions
+- Reduce Figure 5 and 6 sizes by 20-30%
+- Consider combining related visualizations
+- Ensure data labels are at least 8pt
+
+**Update (8-page version)**: Page 7 now contains substantial conclusion content (H100 discussion, integration guidance). Space utilization has improved compared to earlier versions.
 
 ### M4. Table 3 Needs Better Visual Hierarchy
 
@@ -358,22 +367,28 @@ Appropriately summarizes contributions. The H100 and FlashAttention version cave
 - **Limitations box**: Good use of framed format for visibility
 
 **Page 7:**
-- **Content observed**: Section 8 Conclusion (H100 Considerations paragraph, Integration with compression frameworks paragraph)
+- **Content observed**: Table 7 (Head dimension handling comparison), Conclusion section with multiple paragraphs
 - **Specific details**:
-  - H100 paragraph: mentions FlashAttention-3, Hopper GPUs, m16n8k16 tiles
-  - States "Whether similar dimensional collapse occurs on H100 requires empirical validation"
-  - Integration paragraph: mentions PaLU, SVD-LLM, Shape Contract
-  - Shape Contract: d_out mod 8 = 0 for MINIMAL, d_out mod 16 = 0 for OPTIMAL
-  - **ONLY ~15 LINES OF TEXT** on this page
+  - Table 7 shows 8 systems: FlashAttn-2, vLLM, TensorRT, GPTQ/AWQ, PaLU, RAP SVD, "This work"
+  - Table 7 columns: System, Supported head_dim, Misaligned handling
+  - H100 Generalization paragraph discusses m16n8k16 tiles, FlashAttention-3
+  - Software Version Note paragraph mentions FlashAttention 2.7.4 specificity
+  - Integration with Compression Frameworks paragraph with checklist
+  - "Why Projection-Based Methods Don't Benefit" paragraph with architectural explanation
+  - Page appears well-utilized with continuous text
 - **Issues**:
-  1. **SEVERELY UNDERUTILIZED** - nearly 60% of page is blank
-  2. This space could be used for additional content
-  3. The conclusion feels abrupt
+  1. Table 7 TensorRT row shows "32,40,64,80,96,104,128..." with truncation
+  2. Integration checklist could use visual formatting (numbered list)
+- **Assessment**: Page 7 now has good content density
 
 **Page 8 (References):**
-- **Content observed**: References section, ~26 citations
-- **Specific details**: Standard ACM format references, properly formatted
-- **Assessment**: Normal reference page, appropriate
+- **Content observed**: References section, approximately 30 citations in ACM format
+- **Specific details**:
+  - References include: FlashAttention [6][7], vLLM [14], GPTQ [8], AWQ [16], PaLU [9]
+  - Also includes: TensorRT [24], Medusa [3], SparseGPT [10], LoRA [13]
+  - Properly formatted with author names, titles, venues, years
+  - Two-column layout maintained
+- **Assessment**: Standard reference page, well-formatted
 
 ### Figure-by-Figure Assessment
 
@@ -402,8 +417,9 @@ Appropriately summarizes contributions. The H100 and FlashAttention version cave
 
 **Overall page utilization**:
 - Pages 1-6: Good density, appropriate for SIGPLAN format
-- **Page 7: SEVERELY UNDERUTILIZED** - only ~15 lines of text
-- No major blank spaces within pages 1-6
+- Page 7: Well-utilized with Table 7 and conclusion paragraphs
+- Page 8: References only (appropriate)
+- **Total: 6 pages main content + ~2 pages references**
 
 **Figure-text conflict check**:
 - No figures invade text margins
@@ -415,24 +431,25 @@ Appropriately summarizes contributions. The H100 and FlashAttention version cave
 
 | Figure | Problem Type | Description | Suggested Change |
 |--------|-------------|-------------|------------------|
-| Fig 5 | Too large | 6-point scatter plot occupies full column | Reduce by 30-40% |
-| Fig 6 | Too large, unclear purpose | 4-bar chart; shows PaLU benefit, not repair | Reduce or reconsider placement |
-| Fig 2 | Slightly large | Simple histogram could be more compact | Reduce by 15% |
+| Fig 5 | Slightly large | 6-point scatter plot could be more compact | Consider reducing by 20% |
+| Fig 6 | Purpose needs clarification | Shows PaLU benefit, orthogonal to repair | Clarify purpose in caption |
+| Fig 3 | Good | Histogram with scope banner works well | No change needed |
 
-**Space recovery potential**: ~0.5-0.7 pages could be recovered by compressing figures
+**Space recovery potential**: ~0.2-0.3 pages could be recovered by minor figure adjustments
 
 ### Visual Issues Summary
 
-**8 visual issues identified:**
+**7 visual issues identified (updated for 8-page version):**
 
-1. **Page 7**: Only ~15 lines of text - nearly 60% of page empty
-2. **Figure 5**: Too large for 6 data points; data labels 6-7pt too small
-3. **Figure 6**: Too large; purpose unclear (shows PaLU benefit, not dimension repair)
-4. **Table 3**: Key contribution table doesn't stand out enough visually
-5. **Table 1**: Standard deviation formatting inconsistent (some with leading zero, some without)
-6. **Figure 2**: Slightly oversized for a simple histogram
-7. **FlashAttention caveat**: Repeated 4 times, wastes space
-8. **Figure 1**: Some annotation text around 7pt (borderline readable)
+1. **Figure 5**: Data point labels 6-7pt may be too small; could be more compact
+2. **Figure 6**: Purpose as "orthogonal context" could be clearer in layout/caption
+3. **Table 3**: Key contribution table could benefit from stronger visual emphasis
+4. **Table 1**: Standard deviation formatting inconsistent (some with leading zero, some without)
+5. **Table 7**: TensorRT supported dimensions truncated with "..."
+6. **FlashAttention caveat**: Repeated multiple times throughout paper
+7. **Figure 1**: Some annotation text around 7pt (borderline for print)
+
+**Resolved from previous review**: Page 7 underutilization - now contains substantial conclusion content
 
 ---
 
@@ -441,10 +458,9 @@ Appropriately summarizes contributions. The H100 and FlashAttention version cave
 ### High Priority (Must Fix)
 - [ ] **M1**: Elevate scope clarification in Abstract - make "theoretical vs production" distinction in second sentence
 - [ ] **M2**: Reframe E2E validation or add positive E2E case; explicitly state kernel-level focus
-- [ ] **M3**: Reduce Figure 5 size by 30-40% (`\includegraphics[width=0.7\columnwidth]`)
-- [ ] **M3**: Reduce Figure 6 size by 30-40% or reconsider its purpose/placement
-- [ ] **M3**: Fill Page 7 with additional content (expanded discussion, architectural diagram)
+- [ ] **M3**: Consider reducing Figure 5/6 sizes slightly for better information density
 - [ ] **M4**: Make Table 3 more visually prominent (frame, larger caption)
+- [x] **M3 (resolved)**: Page 7 now contains substantial content
 
 ### Medium Priority (Recommended)
 - [ ] **m1**: Enhance Figure 1 caption with key numbers (88%, 96.9%)
@@ -507,20 +523,24 @@ Appropriately summarizes contributions. The H100 and FlashAttention version cave
 **Current Score: 7.35/10**
 
 To reach **7.5/10** (solid Weak Accept):
-1. Fix page 7 underutilization (+0.1 Presentation)
-2. Reduce oversized figures 5/6 (+0.05 Presentation)
+1. Improve Table 3 visual prominence (+0.05 Presentation)
+2. Minor figure size optimizations (+0.05 Presentation)
+3. Clearer scope statement in abstract (+0.05 Writing)
 
 To reach **8.0/10** (Accept):
-1. All presentation fixes above
-2. Add positive E2E validation with vanilla SVD (+0.4 Technical Quality)
-3. Strengthen Table 3 visual hierarchy (+0.1 Presentation)
+1. Add positive E2E validation with vanilla SVD compression (+0.4 Technical Quality)
+2. Demonstrate real-world speedup for applicable architecture (+0.2 Technical Quality)
 
 To reach **8.5/10** (Strong Accept):
 - All above improvements
 - H100 validation data
 - Downstream task evaluation (MMLU, etc.)
 
-**Key insight**: The paper's score is currently capped by (1) presentation issues that are fixable, and (2) the lack of positive E2E validation, which is harder to address without additional experiments.
+**Key insight**: The paper's score is currently capped by the **lack of positive E2E validation**. Presentation issues are minor and the page utilization has improved. The main barrier to acceptance is demonstrating that dimension repair actually helps in an end-to-end scenario - currently only kernel-level benefits are shown, and the one E2E experiment (RAP SVD) shows no benefit.
+
+**Recommended Action for Writer**:
+1. If new experiments possible: Implement vanilla SVD → show E2E speedup
+2. If experiments not possible: Strongly reframe as "diagnostic study" with clear "guidance for future compression designers" positioning
 
 ---
 
