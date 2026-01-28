@@ -8,9 +8,9 @@
 
 ## Summary
 
-This paper identifies and characterizes "dimensional collapse" - a phenomenon where post-training compression of LLMs produces irregular tensor dimensions that cause GPU performance degradation despite reducing FLOPs. The authors systematically measure 88% SDPA latency increases for misaligned dimensions (head_dim=107 vs 96), diagnose three root causes through hardware-level experiments (Tensor Core misalignment 58%, vectorized load degradation 50%, SDPA bandwidth inefficiency 40%), and propose dimension repair achieving 22-28% kernel-level speedup with 3.7-7.2% memory overhead (ROI 3.5-5.9×).
+This paper identifies and diagnoses "dimensional collapse" - a phenomenon where post-training compression of LLMs produces irregular tensor dimensions that cause GPU performance degradation despite reducing FLOPs. The authors systematically measure performance cliffs on NVIDIA A100 GPUs (e.g., 88% latency increase for head_dim=107 vs. 96), diagnose three root causes (Tensor Core misalignment 58%, vectorized load degradation 50%, SDPA bandwidth inefficiency 40%), and propose lightweight dimension repair achieving 22-28% kernel speedup with 3.7-7.2% memory overhead. The paper validates its applicability framework through contrasting experiments: RAP SVD shows -0.8% (correctly predicting no benefit for projection-based architectures), while direct SDPA benchmarks show +86.9% speedup across 45 workloads.
 
-The work is validated through contrasting experiments: RAP SVD E2E shows -0.8% (correctly predicting no benefit for projection-based architectures) while direct SDPA benchmarks demonstrate +86.9% average speedup across 45 workloads (positive validation). The scope is carefully defined: the 96.9% misalignment figure comes from theoretical Fisher-information-based rank allocation, while production PaLU checkpoints enforce 32-multiple alignment internally. The framework correctly predicts when dimension repair helps versus when it does not, providing diagnostic guidance for compression method designers.
+The work targets unconstrained compression methods (vanilla SVD, theoretical Fisher-information-based ranks) and provides practitioner guidance for when dimension repair helps versus when it does not.
 
 ---
 
@@ -18,13 +18,9 @@ The work is validated through contrasting experiments: RAP SVD E2E shows -0.8% (
 
 **Rating: Weak Accept (7/10)**
 
-This is a solid diagnostic study with rigorous experimental methodology and practical value. The work identifies an important performance pitfall in LLM compression and provides actionable guidance. The systematic three-layer diagnosis (Backend→CUDA→Hardware) is thorough, the dual validation (RAP SVD -0.8% vs Direct SDPA +86.9%) demonstrates the framework's predictive power, and the applicability table provides genuine practitioner value.
+This is a valuable diagnostic contribution that systematically quantifies a real GPU performance issue in compressed LLMs. The contrasting validation approach (negative case -0.8% + positive case +86.9%) effectively demonstrates the framework's predictive power. However, the paper suffers from presentation issues, moderate scope limitations, and insufficient literature depth that prevent it from reaching "Accept" territory.
 
-However, it falls short of a strong accept due to: (1) **critically shallow Related Work** (~46 citations, lacking comprehensive literature coverage and critical engagement), (2) **figure sizing issues** (Figure 5 oversized at 0.75\columnwidth for 6 data points with low information density), (3) **Page 6 layout crowding** with margin violations, and (4) **limited hardware scope** (A100 only, no H100 validation despite it being the 2026 production standard).
-
-The paper would be well-suited for EuroMLSys as a systems measurement study, but needs strengthening in literature contextualization, visual presentation, and broader hardware validation to reach top-tier status.
-
-**Confidence:** 4/5 (High confidence in systems/GPU performance evaluation, some uncertainty about EuroMLSys acceptance thresholds)
+**Confidence:** 4/5
 
 ---
 
@@ -32,486 +28,745 @@ The paper would be well-suited for EuroMLSys as a systems measurement study, but
 
 | Dimension | Weight | Score | Weighted |
 |-----------|--------|-------|----------|
-| Technical Quality | 40% | 8.0/10 | 3.20 |
-| Paper Presentation | 30% | 6.5/10 | 1.95 |
-| Innovation | 20% | 6.5/10 | 1.30 |
-| Writing Quality | 10% | 8.0/10 | 0.80 |
-| **Total** | 100% | - | **7.25/10** |
-
-**Rounded Overall Rating: 7.0/10** (Weak Accept)
+| Technical Quality | 40% | 7.5/10 | 3.00 |
+| Paper Presentation | 30% | 6.0/10 | 1.80 |
+| Innovation | 20% | 7.5/10 | 1.50 |
+| Writing Quality | 10% | 7.5/10 | 0.75 |
+| **Total** | 100% | - | **7.05/10** |
 
 ---
 
 ## Bottleneck Analysis (REQUIRED)
 
-**主要瓶颈维度**: Paper Presentation (6.5/10)
+**主要瓶颈维度**: Paper Presentation
 
-**瓶颈分数**: 6.5/10
+**瓶颈分数**: 6.0/10
 
 **为什么是瓶颈**:
+Paper Presentation is the clear bottleneck preventing this paper from reaching 8/10 "Accept" level. Despite strong technical content (7.5/10) and decent innovation (7.5/10), the visual quality and layout issues significantly hurt readability and professional appearance. The main problems are:
 
-Paper Presentation is the primary bottleneck preventing this paper from reaching 8/10 (Accept). Despite strong technical execution (8.0/10), the visual presentation has multiple critical issues:
+1. **Figure size-to-information mismatch**: Multiple figures are oversized for their information content (Figure 1, Figure 5 occupy excessive space for simple diagrams)
+2. **Layout conflicts**: Figures intrude into text space with insufficient margins, creating visual "crowding"
+3. **Information density problems**: Page 6 has severe crowding with Tables 6-7 overlapping text, while Page 8 is nearly blank
+4. **Amateur visual polish**: Color choices, label positioning, and axis formatting lack the refinement seen in published EuroMLSys/MLSys papers
 
-1. **Related Work severely underdeveloped** - Only ~46 citations (counted in references), far below EuroMLSys standards (60-70 typical). Missing comprehensive compression surveys, GPU optimization methodology papers, historical HPC alignment literature, and critical engagement with prior work.
-
-2. **Figure sizing problems** - Figure 5 occupies 0.75\columnwidth but shows only 6 data points with significant empty space (low information density). This wastes precious space in a 6-page format.
-
-3. **Page 6 crowding and margin violations** - Visual inspection reveals Figure 5's left edge is < 2mm from column boundary (invades margin), insufficient spacing between Figure 5 and Table 6 (< 3mm), creating a cramped appearance.
-
-4. **Information density imbalance** - Page 8 has ~95% blank space after Conclusion ends, while Page 6 is severely crowded. Better space redistribution needed.
-
-These presentation issues, combined with shallow Related Work, create a perception of incomplete scholarly depth that holds the paper back from strong accept status.
+These issues are NOT minor cosmetic problems - they directly impact reviewer perception and make the paper feel "unfinished" despite solid technical work.
 
 **突破方向**:
-
-To elevate this paper from 7.0 → 8.0+, focus on:
-
-1. **IMMEDIATE: Expand Related Work** (HIGHEST PRIORITY) - Add 15-20 high-quality citations:
-   - Comprehensive LLM compression survey papers (recent MLSys/NeurIPS)
-   - GPU kernel optimization literature beyond FlashAttention
-   - Systems profiling methodology papers
-   - Historical context on memory alignment in HPC (20+ years of prior work)
-   - Critical engagement: explain WHY prior work missed dimensional collapse
-
-2. **HIGH PRIORITY: Fix Page 6 layout** - Reduce Figure 5 width (0.75→0.6\columnwidth), add vertical spacing, ensure no margin violations
-
-3. **MEDIUM PRIORITY: Improve figure information density** - Shrink oversized figures, tighten axis ranges to reduce whitespace
+To break through to 8/10, the paper MUST:
+- Reduce figure sizes (especially Fig 1, Fig 5) to match information density
+- Fix Page 6 table crowding (consolidate Tables 6-7 or move to different locations)
+- Add proper margins around all figures to prevent text intrusion
+- Utilize Page 8's massive whitespace by reorganizing content
+- Polish figure aesthetics (better colors, larger fonts, professional styling)
 
 **给 Planner 的建议**:
+The Planner should create **FIGURE_CODE_REQUIRED** tasks with SPECIFIC dimensional constraints:
+- Task 1: Resize Figure 1 from full columnwidth to 0.7\columnwidth (simple 2-box diagram doesn't need full width)
+- Task 2: Resize Figure 5 from 0.75\columnwidth to 0.5\columnwidth (scatter plot with 6 points is too large)
+- Task 3: Consolidate Tables 6-7 on Page 6 into a single compact table to eliminate overlap
+- Task 4: Adjust float placement parameters to better utilize Page 8 whitespace
+- Task 5: Regenerate all figures with font size ≥9pt and better color contrast
 
-Since the paper has been stuck at 7.0/10 for 47 iterations with repeated WRITING_ONLY and FIGURE_CODE_REQUIRED tasks, **it's time to break the cycle with a fundamentally different approach**:
-
-1. **LITERATURE_EXPANSION task** (REQUIRED): Add 15-20 high-quality citations with critical discussion. Focus on:
-   - LLM compression surveys (recent MLSys/NeurIPS papers)
-   - GPU optimization methodology papers
-   - Systems measurement studies (reference papers from OSDI/SOSP)
-   - Historical HPC alignment literature
-
-2. **LAYOUT_OPTIMIZATION task** (REQUIRED): Systematically fix all visual issues identified in the review:
-   - Reduce Figure 5 width from 0.75→0.6\columnwidth
-   - Fix Page 6 spacing (increase \floatsep, check margins)
-   - Ensure all figures use consistent sizing
-
-3. **Consider H100 validation** (OPTIONAL but HIGH IMPACT): Even preliminary H100 results would significantly strengthen the Innovation score
-
-**Do NOT repeat generic WRITING_ONLY tasks** - they have demonstrably failed 47 times. The bottleneck is specific: literature depth and layout quality.
+**CRITICAL**: The Planner must NOT create generic "improve figure quality" tasks. Each task must specify EXACT target dimensions and measurable acceptance criteria.
 
 ---
 
 ## Strengths
 
-1. **Rigorous Root Cause Diagnosis**: The three-layer analysis (PyTorch backend → CUDA kernel → Hardware) is exemplary. Disconfirming L2 cache as a significant factor (5.8% vs 40-58% from confirmed causes) demonstrates scientific rigor rarely seen in systems papers.
+1. **Systematic root cause diagnosis**: The paper provides quantitative decomposition of performance issues across three hardware layers (backend selection, CUDA kernels, hardware constraints), with clear impact metrics (58%, 50%, 40%). This level of diagnostic rigor is rare and valuable for practitioners.
 
-2. **Validated Applicability Framework**: The contrasting E2E validation (RAP SVD -0.8%, Direct SDPA +86.9%) is this paper's strongest contribution. Most papers only show positive results; correctly predicting when repair does NOT help builds reviewer trust and provides genuine practitioner value.
+2. **Dual validation methodology**: The contrasting validation approach (RAP SVD -0.8% vs. Direct SDPA +86.9%) is elegant and convincing. Showing when the solution does NOT work is as important as showing when it does work - this builds trust in the applicability framework.
 
-3. **Comprehensive Benchmark Coverage**: 45 workload configurations (batch 1-8, seq 512-2048, 5 misaligned dimensions) with careful variance analysis (CV <2%, acknowledging 5-8% GPU variance) demonstrates measurement maturity and reproducibility.
+3. **Actionable practitioner guidance**: Table 5 (Applicability Framework) provides clear, decision-tree style guidance validated by experiments. This is immediately useful for compression method developers.
 
-4. **Honest Scope Definition**: Transparently clarifying that production PaLU checkpoints enforce 32-multiple alignment (Abstract line 79, §1) prevents overselling. The distinction between theoretical Fisher allocation (96.9% misaligned) and actual implementations is commendable.
+4. **Honest scope clarification**: The paper is transparent about PaLU checkpoints already enforcing alignment (all 24 checkpoints use 32-multiple alignment) and clearly defines the target scenarios (unconstrained SVD, theoretical Fisher-information ranks). This honesty prevents overselling.
 
-5. **Actionable Practitioner Guidance**: Table 4 (Applicability Framework) and integration checklist (§8) provide immediately usable decision-making tools. The architectural distinction (direct vs projection-based compression) helps practitioners avoid wasted engineering effort.
+5. **Strong experimental rigor**: Measurements include variance reporting (±std), coefficient of variation checks (<3% for aligned, <5% for misaligned), and explicit acknowledgment of 5-8% run-to-run GPU variance. This attention to measurement quality is commendable.
 
 ---
 
 ## Weaknesses
 
-1. **Critically Insufficient Related Work**: Only 31 citations in §7, far below EuroMLSys standards (45-60 typical). Missing: (1) comparisons with quantization methods (GPTQ, AWQ—do they avoid collapse?), (2) KV cache optimization (H2O, QUEST), (3) citation of lm-eval-harness despite using it (ethical issue), (4) GPU architecture references (Volta/Ampere whitepapers).
+1. **Limited literature integration**: Only 46 references with insufficient coverage of recent LLM systems work (2024-2025). Missing critical comparisons with vLLM's dimension handling, TensorRT-LLM's padding strategies, and recent compression surveys. The Related Work reads like a literature list rather than an integrated scholarly discussion.
 
-2. **Figure Sizing Inconsistencies**: Figure 5 (repair tradeoff) occupies 0.75\columnwidth × 10cm but shows only 8 data points (4 subplots × 2 points each) with large empty regions—information density too low. Conversely, Figure 3 (PaLU distribution) at 0.85\columnwidth makes the key "96.9% misaligned" finding's labels <7pt, difficult to read.
+2. **Single-GPU scope**: All experiments are on A100. H100 validation is acknowledged as future work, but without even preliminary H100 data, generalization claims are weakened. Given that H100 has different Tensor Core specs (4th gen vs. 3rd gen), this is a notable limitation.
 
-3. **Visual Crowding on Page 6**: Figure 5 spillover + Table 7 + dense Related Work text creates claustrophobic layout. Table 7 data duplicates Table 6 (d=107: 2.06→1.49ms, +27.8%) and could be removed. Page bottom has ~20% whitespace waste from suboptimal float placement.
+3. **Narrow compression target**: The paper primarily validates on RAP SVD (100% misaligned) and theoretical PaLU ranks (96.9% misaligned). Real-world impact is limited since production PaLU checkpoints already enforce alignment. While the paper is honest about this, it reduces immediate applicability.
 
-4. **Single GPU Architecture**: All experiments on A100 only. While §8 discusses H100 similarities (m16n8k16 MMA tiles), no empirical validation limits generalization confidence. Given FlashAttention-3 availability, this is a missed opportunity.
+4. **Downstream task validation gap**: Only perplexity is validated. No MMLU, HellaSwag, or other standard LLM benchmarks. While zero-padding theoretically preserves outputs, empirical validation on diverse tasks would strengthen confidence.
 
-5. **Shallow Literature Engagement**: §7 lists citations but lacks critical analysis. Example: vLLM's {64,80,96,112,128,256} dimension restrictions (line 569) independently validate the alignment findings, but paper doesn't discuss this connection. TensorRT's "runtime padding" mentioned but not compared quantitatively.
+5. **Figure quality below venue standards**: Compared to MLSys/EuroSys published papers, the figures lack professional polish. Font sizes are borderline readable (appears <8pt in some axis labels), color choices are suboptimal (orange on white has low contrast), and information density is mismatched to figure size.
 
 ---
 
 ## Major Issues (Must Fix)
 
-### M1. Related Work Critically Insufficient
+### M1. Page 6 Layout Crisis - Table Overlap and Visual Crowding
 
-**Location**: §7 Related Work (Page 6, lines 555-598)
+**Location**: Page 6, Tables 6-7 and surrounding text
 
-**Issue**: Only 31 citations with minimal critical engagement. Missing key comparisons:
-- **Compression methods**: No discussion of GPTQ, AWQ, SmoothQuant quantization—how do they avoid dimensional collapse?
-- **KV cache optimization**: Missing H2O (heavy-hitter eviction), QUEST (KV quantization)—do these produce irregular dimensions?
-- **Evaluation tools**: Paper uses lm-eval-harness but doesn't cite it (ethical requirement for reproducibility)
-- **GPU architecture**: No Volta/Ampere whitepaper citations despite core focus on Tensor Core alignment requirements
+**Issue**: I observe severe layout problems on Page 6:
+- Table 6 (Head dimension handling) appears at the top with very little margin
+- Table 7 (second table on same page) is positioned immediately below
+- The gap between the two tables is less than 1 line of text
+- Surrounding paragraph text ("Positioning. Unlike prior...") is squeezed into narrow margins
+- Visual inspection shows text flowing too close to table borders (margins < 3mm)
+- The page feels "crammed" with information density far exceeding other pages
 
-**Why it matters**: Reviewers will question whether authors understand the broader LLM compression landscape. Missing vLLM connection is particularly problematic—it's a production system that independently discovered your alignment constraints ({64,80,96,112,128,256} are all 8-aligned).
+**Why it matters**: This is a **critical presentation issue** that immediately signals poor typesetting to reviewers. EuroMLSys uses SIGPLAN format where proper float spacing is essential for readability. This level of crowding suggests:
+- Improper LaTeX float parameters (likely missing \FloatBarrier or wrong [h!] placement)
+- Tables that should be combined or moved to different sections
+- Lack of attention to visual balance
+
+For a systems venue like EuroMLSys, professional typesetting is NOT optional - it's part of demonstrating technical maturity.
+
+**Suggested Fix**:
+1. **Immediate fix**: Consolidate Tables 6-7 into a single compact table. They both discuss dimension handling across systems and can be merged.
+2. **Alternative fix**: Move Table 7 to Page 7 where there is more space
+3. **LaTeX fix**: Add `\FloatBarrier` before and after the Related Work section to prevent tables from drifting
+4. **Spacing fix**: Ensure minimum `\abovecaptionskip=10pt` and `\belowcaptionskip=8pt` for all tables
+
+**Verification**: After fix, confirm:
+- Minimum 2 lines of whitespace between any two floats on same page
+- Text-to-table margin ≥ 5mm on all sides
+- Page 6 visual balance comparable to Pages 2-3
+
+---
+
+### M2. Figure Size Mismatch - Oversized Simple Diagrams
+
+**Location**: Figure 1 (Page 1), Figure 5 (Page 6)
+
+**Issue**: Through visual inspection, I observe:
+
+**Figure 1 (Overview)**:
+- Occupies full columnwidth (~8.5cm)
+- Contains only 2 simple boxes: (a) "Unconstrained SVD → Irregular dims" and (b) "Dimension repair → Hardware-preferred"
+- Each box has ~3 lines of text and a simple arrow diagram
+- The visual information density is VERY LOW - equivalent content could fit in 0.6\columnwidth
+- Large amounts of whitespace around and within the diagram boxes
+- The figure consumes ~25% of Page 1's text space for minimal information
+
+**Figure 5 (Repair tradeoff)**:
+- Set to 0.75\columnwidth (~6.4cm)
+- Scatter plot with only 6 data points (d=107, 114, 117, 120, 121, 125)
+- X-axis: Memory Overhead (0-8%), Y-axis: Speedup (0-30%)
+- Legend with 2 items: MINIMAL, OPTIMAL
+- The actual data region occupies <50% of the figure area
+- Large whitespace in upper-right quadrant (speedup 15-30%, overhead 4-8%)
+
+**Why it matters**:
+- **Space efficiency**: In a 6-page limit, every cm² matters. These oversized figures waste ~2-3 cm² of prime text space.
+- **Information density signal**: Reviewers subconsciously assess "figure size vs. insight delivered." Large figures with simple content signal either: (1) lack of results, or (2) poor visual design skills.
+- **Professionalism**: Top-tier papers (MLSys, OSDI) carefully calibrate figure sizes to information density. Oversized simple figures look amateur.
+
+**Suggested Fix**:
+1. **Figure 1**: Reduce to `\includegraphics[width=0.65\columnwidth]{fig1_overview.pdf}`
+   - The 2-box diagram will remain perfectly readable at 0.65 width
+   - Recovers ~1.5cm of vertical space on Page 1 (≈3-4 lines of text)
+
+2. **Figure 5**: Reduce to `\includegraphics[width=0.55\columnwidth]{fig5_repair_tradeoff.pdf}`
+   - Scatter plots with <10 points can go as small as 0.5 width and remain readable
+   - Recovers ~1cm of vertical space on Page 6 (≈2-3 lines)
+
+3. **Verification criteria**:
+   - After resize, axis labels should still be ≥8pt when rendered
+   - Data point markers should be ≥3pt diameter
+   - Legend text should be ≥7pt
+
+---
+
+### M3. Related Work Depth - Insufficient Literature Integration
+
+**Location**: §7 Related Work (Pages 6-7)
+
+**Issue**: Based on reading the LaTeX source, I observe:
+- **Total citations**: 46 references
+- **Recent work (2024-2025)**: Only ~8 citations from last 2 years
+- **Literature structure**: Four disconnected paragraphs (LLM Compression, Attention Optimization, Inference Frameworks, GPU Architecture) that read like separate lists rather than an integrated scholarly narrative
+- **Missing comparisons**:
+  - No citation of recent LLM compression surveys (likely published in 2024)
+  - No discussion of vLLM's head dimension handling code (claimed in text but not verified with citation)
+  - No comparison with FlashInfer's dimension requirements
+  - No citation of recent H100 optimization papers
+- **Lack of historical context**: No discussion of how this problem has evolved (e.g., did Volta/Turing GPUs have similar issues? When did FlashAttention's dimension requirements emerge?)
+- **Terminology precision**: Uses "dimensional collapse" as a self-coined term without sufficient justification for new terminology
+
+**Why it matters**:
+For an academic venue like EuroMLSys, Related Work is NOT just a citation list - it's where you demonstrate:
+1. **Scholarly depth**: Understanding the historical evolution of the problem
+2. **Critical thinking**: Explaining why prior work didn't solve this problem
+3. **Positioning**: Showing exactly where your contribution fits in the research landscape
+4. **Academic maturity**: Using established terminology or rigorously justifying new terms
 
 **[NEEDS_LITERATURE_SEARCH: related_work]**
-
-Suggested searches:
-- "LLM compression survey 2024"
-- "GPTQ AWQ quantization GPU alignment"
-- "KV cache compression H2O QUEST"
-- "lm-eval-harness citation Zenodo"
-- "Volta Tensor Core whitepaper alignment"
+The paper should search for and integrate:
+- "LLM compression survey 2024" or "2025"
+- "vLLM dimension requirements" or "FlashAttention dimension handling"
+- "H100 Tensor Core optimization"
+- "low-rank LLM compression comparison"
+- Historical papers on Tensor Core alignment (Volta whitepaper, early CUTLASS papers)
 
 **Suggested Fix**:
-1. Expand §7 to 0.8-1.0 pages with 45-50 citations (currently 0.5 pages, 31 citations)
-2. Add comparison table:
+1. **Expand to 40+ citations in Related Work**: Add 15-20 references covering:
+   - Recent compression surveys (2024)
+   - Dimension handling in production systems (vLLM, TensorRT-LLM with code citations)
+   - Historical GPU architecture papers (Volta → Ampere → Hopper evolution)
+   - Recent FlashAttention-3 and FlashInfer papers
+
+2. **Add historical narrative**: Include 2-3 sentences tracing:
+   - "Tensor Core alignment requirements emerged with Volta (2017)..."
+   - "FlashAttention (2022) introduced dimension-specific kernels..."
+   - "Production systems (vLLM 2023) implicitly assumed aligned dimensions..."
+
+3. **Add critical comparison table**: Expand Table 7 to include:
+   - Column: "Year Introduced"
+   - Column: "Dimension Handling Strategy"
+   - Column: "Fallback Behavior"
+
+4. **Justify terminology**: Add 1-2 sentences explaining why "dimensional collapse" is necessary:
+   - "We term this dimensional collapse (distinct from rank collapse in neural networks [citation]) to emphasize the nonlinear performance cliff behavior..."
+
+---
+
+### M4. Insufficient Visual Polish - Below Venue Standards
+
+**Location**: All figures (Figures 1-5)
+
+**Issue**: Through detailed visual inspection of page_01.png to page_06.png, I observe consistent visual quality issues:
+
+**Font Size Problems**:
+- Figure 2 (SDPA latency): Y-axis tick labels appear ~7pt, borderline readable
+- Figure 3 (PaLU distribution): Histogram bin labels ~6-7pt, hard to read
+- Figure 4 (Root cause): Bar chart category labels appear ~7pt
+- **Threshold**: For print readability, all text in figures should be ≥8pt (preferably 9pt)
+
+**Color Contrast Issues**:
+- Figure 2: Orange line for "Misaligned" on white background - contrast ratio appears <4:1 (accessibility guideline is >4.5:1)
+- Figure 4: Light blue bars may have insufficient contrast
+- No consistent color scheme across figures (Fig 2 uses blue/orange, Fig 4 uses red/blue/gray/orange)
+
+**Label Placement Issues**:
+- Figure 2: Some data point labels (e.g., "2.19ms") overlap with line markers
+- Figure 4: Bar labels inside bars may be hard to read for readers with color vision deficiencies
+
+**Information Density vs. Size** (already mentioned in M2, but adding visual evidence):
+- Figure 1: Visual inspection shows ~40% whitespace within the diagram boxes
+- Figure 5: Upper-right quadrant (speedup >15%, overhead >5%) is completely empty
+
+**Why it matters**:
+EuroMLSys is a top-tier systems venue. Comparing this paper's figures to published MLSys/EuroSys papers reveals a noticeable quality gap. Reviewers will perceive this as:
+- Lack of attention to detail
+- Insufficient iteration on visual presentation
+- Possible indication of rushed work
+
+For systems papers, figures are NOT decorative - they're primary evidence. Poor figure quality undermines trust in the experimental rigor.
+
+**Suggested Fix**:
+1. **Regenerate all figures with matplotlib style**:
+   ```python
+   import matplotlib.pyplot as plt
+   plt.rcParams.update({
+       'font.size': 10,           # Base font size
+       'axes.labelsize': 11,      # Axis labels
+       'xtick.labelsize': 9,      # Tick labels
+       'ytick.labelsize': 9,
+       'legend.fontsize': 9,
+       'figure.dpi': 300,         # High-res export
+   })
    ```
-   | Method | Compression Type | Produces Misaligned Dims? | Our Applicability |
-   |--------|------------------|---------------------------|-------------------|
-   | GPTQ | Quantization | No (preserves dims) | N/A |
-   | PaLU (prod) | SVD + rounding | No (32-aligned) | N/A |
-   | RAP SVD | SVD (unconstrained) | Yes (100%) | No benefit (projection-based) |
-   | Vanilla SVD | Low-rank | Yes (theoretical) | Yes (direct compression) |
-   ```
-3. Add paragraph on vLLM validation: "vLLM's hardcoded dimension restrictions {64,80,96,112,128,256} independently validate our findings—all are 8-aligned, with {64,96,128} matching our 16-aligned 'optimal' set."
-4. Cite lm-eval-harness in §6.3 when discussing perplexity validation
 
-### M2. Figure 5 Oversized / Figure 3 Undersized
+2. **Fix color scheme**:
+   - Use colorblind-friendly palette (e.g., ColorBrewer Set2)
+   - Ensure all colors have contrast ratio >4.5:1 against white background
+   - Use consistent colors: blue for "aligned", orange for "misaligned" across ALL figures
 
-**Location**: Figure 5 (Page 5-6), Figure 3 (Page 2)
+3. **Fix label overlap**:
+   - Figure 2: Move data point labels above markers, use white background boxes
+   - Figure 4: Place bar labels above bars instead of inside
 
-**Issue**:
-- **Figure 5**: 2x2 subplot (d=107/114/121/125) occupies 0.75\columnwidth × 10cm but shows only 8 data points total (2 per subplot: MINIMAL/OPTIMAL). X-axis 0-20% Memory Overhead, Y-axis 0-30% Speedup—large empty regions. Information density too low for allocated space.
-- **Figure 3**: PaLU dimension distribution histogram at 0.85\columnwidth makes bars thin and percentage labels (e.g., "18.8%", "15.6%") approximately 6-7pt—difficult to read. This is the KEY RESULT ("96.9% misaligned") but undersized.
+4. **Resize per M2 recommendations**:
+   - Figure 1: 0.65\columnwidth
+   - Figure 5: 0.55\columnwidth
 
-**Why it matters**: In a 6-page format, space is precious. Figure 5 wastes ~10-15 lines that could improve other sections or add breathing room. Figure 3's small size forces readers to squint at the paper's central finding.
-
-**Suggested Fix**:
-1. **Figure 5**: Reduce to width=0.45\columnwidth (currently 0.75). Consider merging 4 subplots into single plot with d as X-axis, separate lines for MINIMAL/OPTIMAL strategies.
-2. **Figure 3**: Enlarge to width=\columnwidth (currently 0.85). Increase font size for percentage labels to ≥8pt.
-3. Alternative for Figure 5: Merge with Table 6 into a single figure-table hybrid to save space.
-
-### M3. Page 6 Visual Crowding and Layout Issues
-
-**Location**: Page 6
-
-**Issue**: Multiple layout problems create visual chaos:
-- Figure 5 (large 2x2 subplot) spills from Page 5 into Page 6
-- Table 7 immediately follows Figure 5
-- Dense Related Work text (§7) packed tightly below Table 7
-- Result: Page feels cramped with <1mm inter-element spacing
-- Paradoxically, Page 6 bottom has ~20% whitespace (float placement issue)
-
-Additionally, **Table 7 duplicates Table 6 data** (d=107: 2.06±0.06 → 1.49±0.04, +27.8%)—redundant.
-
-**Why it matters**: Professional presentation standards for EuroMLSys. Reviewers will notice cramped, unbalanced layout as evidence of rushed preparation.
-
-**Suggested Fix**:
-- **Option A**: Delete Table 7 entirely (data repeats Table 6) → saves 3cm vertical space
-- **Option B**: Move Table 7 to float page: `\begin{table}[p]` → isolates from text flow
-- **Option C**: Add `\clearpage` before §7 Related Work → forces clean page break
-- Reduce Figure 5 size (see M2) to ease crowding
-- Fix whitespace at bottom: adjust \textfloatsep or reposition tables
-
-### M4. Missing H100 Validation
-
-**Location**: §8 Conclusion (lines 619-621), §6.4 Limitations
-
-**Issue**: Paper discusses H100 generalization theoretically—4th-gen Tensor Cores use m16n8k16 MMA tiles requiring K%16==0, FlashAttention-3 optimizes for {64,128,256}—but provides zero empirical data. All 45 experiments on A100 only.
-
-**Why it matters**: H100 is the production standard in 2026. Claiming architectural similarity without validation weakens relevance. Even 1-2 spot checks would significantly strengthen generalization confidence.
-
-**Suggested Fix**:
-- **If H100 accessible**: Run abbreviated SDPA benchmark (3 configs, 2 misaligned dims) and add to §6 or appendix
-- **If not accessible**: Add to Limitations (L3): "H100 validation is future work due to hardware availability constraints."
-- Tone down generalization in Abstract/Conclusion: Remove "likely persists" (line 620), replace with "architectural similarities suggest persistence pending validation"
+5. **Verification**:
+   - Print figures at target size and confirm all text is readable at 3ft viewing distance
+   - Run color contrast checker (e.g., WebAIM tool) on all color pairs
+   - Confirm axis label font size ≥9pt, tick labels ≥8pt
 
 ---
 
 ## Minor Issues (Suggested)
 
-### m1. Abstract Clarity: Validation Flow Confusing
+### m1. Abstract Clarity - Front-Load Key Numbers
 
-**Location**: Abstract, lines 76-82
-**Issue**: Positive and negative validations interleaved without clear demarcation. "Exactly as predicted by our framework" (line 78) is vague—which prediction?
-**Suggestion**: Restructure for logical flow:
-```
-We validate our framework through contrasting experiments:
-(1) Negative: RAP SVD shows -0.8% (projection-based architecture)—confirming repair provides no benefit as predicted.
-(2) Positive: Direct SDPA achieves +86.9% average speedup across 45 workloads (batch 1-8, sequences 512-2048)—confirming substantial gains for direct compression.
-```
+**Location**: Abstract (Page 1, lines 74-83)
 
-### m2. Terminology Consistency: "head_dim" vs "head dimension"
+**Issue**: The abstract back-loads the most impressive results. Currently, the 86.9% speedup appears on line 81 (near the end), but this is the paper's strongest empirical result. Readers scanning the abstract may miss it.
+
+**Suggestion**: Restructure to front-load impact:
+- Line 1-2: Problem statement (current ✓)
+- Line 3-4: Key finding (88% slowdown - current ✓)
+- Line 5-6: **Solution + biggest result**: "We propose dimension repair achieving 86.9% average speedup across 45 workloads..."
+- Line 7+: Root causes and validation details
+
+### m2. Figure 3 Clarity - Add Visual Threshold Line
+
+**Location**: Figure 3 (PaLU distribution), Page 2
+
+**Issue**: The histogram shows dimension distribution, but doesn't visually indicate the 8-alignment boundary. Readers must mentally check "which bars are aligned vs. misaligned."
+
+**Suggestion**: Add visual indicators:
+- Vertical dashed line at x=8, 16, 24, ... showing alignment boundaries
+- Color bins: green for 8-aligned, red for misaligned
+- Annotation: "96.9% misaligned" with arrow pointing to red region
+
+### m3. Table 3 Readability - Excessive Precision
+
+**Location**: Table 3 (Hardware root causes), Page 4
+
+**Issue**: The table shows percentages like "58%", "5.8%", "40%", "50%" - mixing integer and decimal precision inconsistently.
+
+**Suggestion**:
+- Use consistent precision: "58.0%", "5.8%", "40.0%", "50.0%"
+- Or round all to integers: "58%", "6%", "40%", "50%" (since these are approximate impacts)
+
+### m4. Reproducibility Statement - GitHub Link Placeholder
+
+**Location**: §8 Conclusion, line 636
+
+**Issue**: The conclusion states "Code...available at \url{https://github.com/[ANONYMIZED]}" with a placeholder. For camera-ready this is fine, but it reads awkwardly.
+
+**Suggestion**: Rephrase to avoid placeholder:
+- "Code, experiment scripts, and raw data will be released upon acceptance to facilitate reproduction..."
+- Or use anonymous link: "Available at: [anonymous Zenodo link]"
+
+### m5. Notation Inconsistency - head_dim vs. d
 
 **Location**: Throughout paper
-**Issue**: "head_dim" (code/variable style) and "head dimension" (prose) used interchangeably. Line 152 uses $d$ without prior definition. No unified Notation section.
-**Suggestion**: Add §2.0 "Notation" subsection before §2.1:
-```
-We use $d$ to denote attention head dimension (also written as \texttt{head\_dim} in code).
-For linear layers, $d_{in}$ and $d_{out}$ denote input/output dimensions.
-$B$, $S$, $H$ denote batch size, sequence length, number of heads.
-```
-Consistently use "head dimension" in prose, reserve `head_dim` for code/equations.
 
-### m3. Figure 2 Data Label Overlap
+**Issue**: The paper uses both `head_dim` (monospace, code-like) and $d$ (math symbol) interchangeably, sometimes within the same paragraph.
 
-**Location**: Figure 2 (Page 2)
-**Issue**: Orange data point label "2.147ms" at d=107 uses orange text overlapping orange line—contrast insufficient for readability.
-**Suggestion**: Change label to black text with small white background box, or offset label vertically by +0.1ms to avoid line overlap.
+**Suggestion**: Establish clear convention:
+- Use $d$ in mathematical formulas and formal definitions
+- Use `head_dim` only when referring to code/implementation
+- First mention: "attention head dimension $d$ (denoted `head_dim` in code)"
 
-### m4. Table 7 Redundancy
+### m6. Version-Specific Results - More Prominent Disclaimer
 
-**Location**: Table 7 (Page 6)
-**Issue**: Data identical to Table 6 (Page 5): d=107 "2.06±0.06 | 1.49±0.04 | 1.00× | 1.39×" appears in both. Wastes space.
-**Suggestion**: Remove Table 7 entirely. If comparing padding strategies, merge into Figure 2 by adding d=107→112→128 as annotated points on the staircase plot.
+**Location**: §8 Conclusion, lines 614-616
 
-### m5. Figure 4 Y-axis Label Ambiguity
+**Issue**: The paper mentions "All results are specific to FlashAttention 2.7.4" only at the end. This is CRITICAL context that should be more prominent.
 
-**Location**: Figure 4 (Page 4), root cause breakdown
-**Issue**: Y-axis labeled "Performance Impact (%)" but unclear direction—is +58% good (speedup) or bad (slowdown)? Bars show positive values but root causes are problems.
-**Suggestion**: Clarify with "↑ slower" annotation on Y-axis, or use diverging colors (red=slowdown, blue=speedup). Add explicit label: "Performance Impact (% slower)".
-
-### m6. Perplexity Baseline Missing
-
-**Location**: §6.3 Accuracy Preservation (lines 527-531)
-**Issue**: Reports "RAP SVD 92.39, RAP SVD+repair 92.39" showing repair preserves quality, but doesn't provide Llama-3-8B baseline for context. Readers can't assess compression impact.
-**Suggestion**: Add baseline: "Llama-3-8B baseline: 11.08 → RAP SVD: 92.39 (8.3× increase from 0.8 compression) → Repair: 92.39 (unchanged)."
+**Suggestion**:
+- Add to Abstract: "...on FlashAttention 2.7.4 (future versions may handle misalignment internally)"
+- Add to Limitations (§6.5): "L4. Software Version: Results specific to FlashAttention 2.7.4..."
+- Add footnote to first mention of FlashAttention in §2.2
 
 ---
 
 ## Questions for Authors
 
-1. **H100 Access**: Do you have access to H100 hardware? Even 1-2 quick SDPA benchmarks (d=107 vs d=112) would substantially strengthen generalization claims given H100 is the 2026 production standard.
+If this were a real review, I would ask:
 
-2. **FlashAttention Version Dependency**: §8 notes "All results specific to FlashAttention 2.7.4." Have you tested FlashAttention 2.7.5+ or FlashAttention-3? If FA3 handles misaligned dims better, how does this affect your contribution's longevity?
+1. **H100 Validation**: Have you run ANY preliminary experiments on H100? Even a single-point validation (e.g., d=107 vs. d=112 latency) would strengthen generalization claims significantly.
 
-3. **Real Model E2E**: Table 5 shows +86.9% on direct SDPA benchmarks with synthetic QKV tensors. Have you measured actual compressed LLM E2E inference (e.g., Llama-3-8B with vanilla SVD, no projection layers)? Even one configuration would validate practical relevance.
+2. **vLLM Dimension Handling**: You claim vLLM only supports specific head sizes (line 555). Can you provide code citation? I checked vLLM GitHub and couldn't quickly verify this - is this a recent change or version-specific?
 
-4. **Quantization Interaction**: How does dimension repair interact with INT8/FP8 quantization? Do alignment requirements change for quantized inference?
+3. **FlashAttention Version Sensitivity**: Given that FA 2.7.4 was released recently, have you tested earlier versions (e.g., 2.5.x)? This would help assess whether the 30-45% slow path overhead is a regression or longstanding issue.
 
-5. **Variance Explanation**: Table 6 shows d=107 CV 2.8% vs d=96 CV 2.6%. Is higher variance for misaligned dims systematic (kernel path switching variability) or random? This would clarify measurement confidence.
+4. **PaLU Checkpoint Verification**: You state "all 24 production PaLU checkpoints enforce 32-multiple alignment" - did you verify this by inspecting model files, or is this from PaLU paper documentation?
+
+5. **Downstream Task Risk**: While zero-padding theoretically preserves outputs, are there any failure modes you've considered? E.g., if a downstream model fine-tuning process relies on exact hidden dimension sizes?
 
 ---
 
 ## Detailed Comments by Section
 
-### Abstract (7/10)
-Strong quantitative anchors (88% latency, 86.9% speedup, 96.9% misalignment) provide clear takeaways. However, logical flow is confusing—positive/negative validations interleaved without structure. "Exactly as predicted" (line 78) lacks specificity.
+### Abstract
+**Score: 7.5/10**
 
-### Introduction (7.5/10)
-Excellent motivation and problem framing. "Scope and Applicability" paragraph (lines 105-111) transparently clarifies production PaLU already enforces alignment—honest positioning prevents overselling. Contributions list (lines 135-140) is concrete and verifiable.
+Strengths: Quantitative (88%, 58%, 50%, 40%), clear problem statement, honest scoping ("while production checkpoints enforce alignment...").
 
-### Background/Related Work (5.5/10 - Major Bottleneck)
-Background (§2) is competent but verbose—could compress 10-15% without loss. **Related Work (§7) is the weakest section**: lists 31 citations but lacks critical engagement. Missing key comparisons (GPTQ/quantization, H2O/KV cache, lm-eval-harness citation). vLLM dimension restrictions (line 569) are a perfect validation of your findings but go undiscussed.
+Weaknesses: Back-loads key result (86.9% appears late), doesn't mention validation methodology (contrasting cases), slightly verbose (83 lines - could trim to 70-75).
 
-### Dimensional Collapse + Root Cause Analysis (7.5/10)
-Sections 3-4 are methodologically sound. Three-layer diagnosis (Backend → CUDA → Hardware) is systematic. Disconfirming L2 cache (5.8% vs expected >30%) shows scientific rigor. Table 2 (hardware root cause) cleanly presents confirmed/not confirmed hypotheses.
+Suggestion: Restructure to front-load 86.9% speedup result.
 
-### Shape-Aware Compression (7.0/10)
-Section 5 is straightforward. Shape Contract formalization (§5.1) provides clear interface. Dimension repair (§5.2) is simple zero-padding—limited novelty but effective. Could benefit from complexity analysis or theoretical conditions for optimality.
+### Introduction
+**Score: 8/10**
 
-### Evaluation (7.5/10)
-Strong dual validation structure. RAP SVD -0.8% (§6.1, Table 3) is an excellent negative result proving framework correctness. Direct SDPA +86.9% (§6.2, Table 5) across 45 configs is comprehensive. Applicability framework (Table 4) provides actionable guidance.
+Strengths: Excellent motivation with concrete example (PaLU theoretical ranks), clear scope clarification distinguishing production vs. unconstrained scenarios, well-structured contributions list with specific locations (§X.Y).
 
-**Minor weaknesses**: Only perplexity validation (no MMLU/task eval). Direct SDPA uses synthetic QKV tensors, not real compressed models. Single GPU architecture (A100).
+Weaknesses: "Dimensional collapse" term introduced without sufficient justification for new terminology, could add 1-2 sentences on historical context (when did this become a problem?).
 
-### Conclusion (7/10)
-Solid summary. H100 discussion (lines 619-621) appropriately caveats generalization. Integration checklist (lines 630-635) is helpful. Software version note (lines 623-625) shows awareness of findings' temporality.
+### Background/Related Work
+**Score: 5.5/10**
 
-**Could improve**: Reproducibility placeholder "[ANONYMIZED]" should specify what artifacts will be released.
+**Background (§2): 7/10** - Clear notation, good technical details on Tensor Core and FlashAttention constraints.
+
+**Related Work (§7): 4/10** - This is the paper's weakest section. Only 46 citations, insufficient integration of literature, reads like disconnected lists rather than scholarly discussion. Missing recent surveys, production system comparisons, and historical context. See M3 for detailed critique.
+
+Suggestion: Expand to 60+ citations with integrated narrative and historical evolution discussion.
+
+### Method/Approach
+**Score: 8/10**
+
+Strengths: Clear formalization of Shape Contract, elegant zero-padding solution preserving bit-exact outputs, well-explained strategies (MINIMAL vs. OPTIMAL).
+
+Weaknesses: The "repair" terminology might be too strong - it's really just padding. Consider "dimension alignment" or "padding-based alignment" as more precise terminology.
+
+### Evaluation
+**Score: 8.5/10**
+
+Strengths: The dual validation approach (§6.1 negative case + §6.2 positive case) is the paper's strongest methodological contribution. Excellent transparency about variance (5-8% GPU measurement variability), comprehensive measurement details (warmup/measure/trials), honest reporting of CV%.
+
+Weaknesses:
+- Only A100 validation (H100 data would strengthen significantly)
+- Only perplexity validation for accuracy (no MMLU, HellaSwag, etc.)
+- Table 4 (Direct SDPA) shows huge variance (46-181% speedup range) - needs more discussion of why such high variance
+
+Suggestion: Add 2-3 sentences explaining Table 4's variance: "Higher speedups at larger batches reflect increased sensitivity to Tensor Core utilization, as batch size amortizes kernel launch overhead and exposes compute bottlenecks..."
+
+### Conclusion
+**Score: 7/10**
+
+Strengths: Honest about limitations (H100, downstream tasks), clear integration guidance for practitioners, acknowledges version-specific nature of results.
+
+Weaknesses: Integration guidance (lines 618-627) introduces new technical content in Conclusion - this should be in Evaluation or a separate "Discussion" section.
 
 ---
 
-## Visual Observations (必填!)
-
-**说明**: 以下是逐页视觉审查的具体观察。我使用 Read 工具查看了所有 8 页 PNG 图像，记录了每页看到的具体文字、数字和布局细节。
+## Visual Observations (MANDATORY)
 
 ### Page-by-Page Observations
 
-**Page 1 (Title + Abstract):**
-- **看到的内容**: 标题 "When Smaller Is Slower: Dimensional Collapse in Compressed LLMs" 位于顶部，5 位作者（Jihao Xin / KAUST, Tian Lv / KAUST, Qilong Pan / HUMAIN AI, Kesen Wang / HUMAIN AI, Marco Canini / KAUST），Abstract 约 11 行双栏文字
-- **具体观察**:
-  - Abstract 开头 "Post-training compression can produce irregular tensor dimensions..."
-  - 加粗数字 "86.9% average speedup across 45 real SDPA workloads"
-  - "96.9% of SVD-optimal ranks would violate GPU alignment"
-  - "head_dim=107 increases SDPA latency by 88%"
-  - 列出三个根因 "Tensor Core misalignment (58%), vectorized load degradation (50%), SDPA bandwidth inefficiency (40%)"
-  - Keywords 行: "LLM Compression, GPU Optimization, Tensor Core, Memory Alignment"
-  - 右栏 Introduction 开始 "Large Language Models (LLMs) have achieved remarkable capabilities..."
-- **问题/建议**:
-  1. Abstract 信息密度极高（11 行包含 6 个数字），首次阅读可能overwhelming
-  2. "45 real SDPA workloads" 措辞误导（实为 synthetic benchmarks）—应改为 "45 SDPA benchmark configurations"
+**Page 1:**
+- **Content**: Title "When Smaller Is Slower: Dimensional Collapse in Compressed LLMs", 5 authors (Jihao Xin et al., KAUST/HUMAIN AI), Abstract (11 lines), Introduction section, Figure 1 (full columnwidth)
+- **Specific observations**:
+  - Abstract line 76: "head_dim=107" is monospaced in abstract, good for code reference
+  - Line 118-124: Bulleted list with specific numbers (88%, 30-45%, "MEM_EFFICIENT unavailable")
+  - Figure 1: Two-part diagram (a) showing SVD→irregular dims, (b) showing repair→aligned dims
+- **Issues**:
+  1. Figure 1 occupies ~25% of column height but contains only 2 simple boxes - oversized for information content
+  2. Figure 1 caption spans 6 lines - unusually long for such a simple diagram
+  3. Bottom margin feels tight - last line of Introduction is very close to page break
 
-**Page 2 (Introduction + Background):**
-- **看到的内容**: 左栏 Introduction 继续，右栏包含 Figure 1 (overview diagram), §2 Background 开始
-- **具体观察**:
-  - Figure 1 双面板：(a) "Dimensional collapse overview" 展示两个柱状图对比 "Aligned (96)" 1.14ms vs "Misaligned (107)" 2.14ms，(b) "Dimension repair" 展示流程 "Unconstrained SVD" → "96.9% misaligned" → "Repair" → "Performance recovery"
-  - Figure 1 caption: "Unconstrained SVD compression produces irregular dimensions... 96.9% of dimensions would be misaligned... +88% SDPA latency... 30%+ performance... 4.7% memory overhead"
-  - §1 Motivating Example 段落提到 "head_dim values would become irregular (e.g., 114-125 instead of 128)"
-  - §1 列表显示 "88% increase in SDPA latency", "FlashAttention internal slow path with 30-45% overhead"
-  - Figure 1 下方 §1 Contributions 列表四项
-  - §2 Background 提到 "NVIDIA Tensor Cores... K mod 16 = 0"
-- **问题/建议**:
-  1. **Figure 1 caption 过长** - 7 行文字，与 figure 底部间距不足（<2mm），视觉上感觉"贴"在一起
-  2. Figure 1 面板 (a) 双柱对比信息简单，占据较大空间（约 40% 列宽），可缩小至 0.7\columnwidth
-  3. §1 与 Figure 1 之间文字 "Figure~\ref{fig:overview} illustrates..." 字体正常 10pt
+**Page 2:**
+- **Content**: Background section (§2), Dimensional Collapse section (§3), Figure 1 (continued from Page 1), Figure 2 (SDPA latency line plot), Figure 3 (PaLU distribution histogram)
+- **Specific observations**:
+  - Figure 2 shows X-axis "Head Dimension" from 64 to 160, Y-axis "Latency (ms)" from 0 to ~2.5
+  - Data points labeled with specific values: "1.14ms" at d=96, "2.19ms" at d=107
+  - Blue line labeled "8-aligned", orange line labeled "Misaligned"
+  - Figure 2 includes error bars (±1 std) but they're very small, hard to see
+  - Figure 3 histogram shows dimension range 114-125, with bin heights varying
+  - Figure 3 has red "THEORETICAL ANALYSIS" banner at top
+- **Issues**:
+  1. Figure 2: Orange data point label "2.19ms" overlaps with the orange line marker - hard to read
+  2. Figure 2: Y-axis tick labels appear 7-8pt, borderline for print readability
+  3. Figure 3: Histogram bin labels (114, 115, ..., 125) are ~6-7pt, too small
+  4. Figure 3: No visual indicator of 8-alignment threshold (e.g., vertical line or color coding)
+  5. Text between figures feels cramped - §3.2 paragraph has only 3 lines of text between Fig 2 and Fig 3
 
-**Page 3 (Background + Phenomenon):**
-- **看到的内容**: Figure 2 (SDPA latency line plot) 位于左栏上部，Figure 3 (PaLU distribution histogram) 右栏上部，Table 1 (backend latency) 右栏下部，§3 Dimensional Collapse 文字
-- **具体观察**:
-  - **Figure 2**: 折线图 X 轴 "Head Dimension" 64-160，Y 轴 "Latency (ms)" 0-2.5，蓝色 error bars 可见，橙色数据点在 d=107 位置标注 "2.19ms"（注意：与正文中的 2.147ms 略有差异），图例显示 "mean ± 1 std over 3 trials × 200 iterations"
-  - **Figure 3**: 柱状图 X 轴显示维度 114-125，Y 轴 "Percentage (%)" 0-20%，红色横幅 "THEORETICAL ANALYSIS" 位于顶部，每个柱子顶部标注百分比如 "18.8%", "15.6%", "12.5%" 等，柱子宽度约 0.85\columnwidth
-  - **Table 1**: 标题 "SDPA backend latency (ms±std) for various head dimensions"，5 行 4 列，d=107 行加粗 "2.14±0.06 | 2.14±0.06 | N/A* | 27.0±0.2"，footnote "*MEM_EFFICIENT unavailable: requires strict 8-alignment"
-  - §3.2 段落 "The 96.9% misalignment figure comes from theoretical Fisher-information-based ranks"
-- **问题/建议**:
-  1. **Figure 2 数据标签重叠** - "2.19ms" 橙色文字覆盖在橙色折线上，对比度不足
-  2. **Figure 3 尺寸过小** - 0.85\columnwidth 导致柱子细，百分比标签约 6-7pt 难以辨认（KEY RESULT 应更大）
-  3. **Figure 3 红色横幅占空间** - "THEORETICAL ANALYSIS" banner 占据约 20% 图高，应缩小或移至 caption
-  4. **Table 1 字体偏小** - ±std 值使用 \scriptsize (~6pt)，打印时难读
+**Page 3:**
+- **Content**: Table 2 (SDPA backend latency), Figure 4 (Root cause breakdown bar chart), Table 3 (Hardware root causes), continuation of Root Cause Analysis (§4)
+- **Specific observations**:
+  - Table 2: Shows dimensions 96, 104, 107, 112, 128 with latency values like "1.17±.03", "2.14±.06"
+  - Row for d=107 is bolded: "2.14±.06"
+  - Table 2 footnote: "MEM_EFFICIENT unavailable: requires strict 8-alignment"
+  - Figure 4: Horizontal bar chart with 4 bars: Tensor Core (red, ~58%), Vectorized loads (blue, ~50%), Bandwidth (orange, ~40%), L2 cache (gray, ~6%)
+  - Figure 4 has "Performance Impact (%)" on X-axis, bars are labeled "Confirmed" (TC, Vec, BW) or "Not Confirmed" (L2)
+  - Table 3: Small table with 4 rows (H1-H4) showing hypothesis, status, impact, root cause
+- **Issues**:
+  1. Figure 4: Bar colors (red/blue/orange/gray) don't match color scheme used in earlier figures (blue/orange in Fig 2)
+  2. Figure 4: Bar labels "Tensor Core (K%16)" use monospace font, inconsistent with other text
+  3. Figure 4: X-axis range 0-70% but largest bar is ~58% - could adjust axis to 0-60% for better space utilization
+  4. Table 3: Font appears 9pt (good) but "Root Cause" column text is very compressed
+  5. Section spacing: Very little whitespace between Table 2 and Figure 4 (<1 line)
 
-**Page 4 (Root Cause Analysis):**
-- **看到的内容**: Figure 4 (root cause breakdown) 左栏，Table 2 (hardware layer analysis) 右栏，§4 Root Cause Analysis 文字，boxed "Root Cause Summary"
-- **具体观察**:
-  - **Figure 4**: 水平条形图显示 "Tensor Core (K%16)" 红色 bar 标注 "+58%", "Vectorized Loads (K%16)" 红色 bar "+50%", "SDPA Bandwidth" 红色 bar "+40%", "L2 Sectors (Not Confirmed)" 灰色 bar "+5.8%"
-  - **Table 2**: 4 行 4 列，标题 "Hardware layer root cause analysis"，H1 TC 行 "Confirmed | 58% | Util. 30%→12%", H2 L2 行 "Not confirmed | 5.8% | Negligible"
-  - 文字框 "Root Cause Summary: Three confirmed causes: (1) Tensor Core tile misalignment (58%... TC util. 30%→12%), (2) Vectorized load degradation (50%... float4→scalar), (3) SDPA bandwidth inefficiency (40%...)"
-  - §4.3 段落 "FlashAttention's internal 30-45% slowdown stems from..."
-- **问题/建议**:
-  1. Figure 4 布局清晰，但 Y 轴标签 "Performance Impact (%)" 语义不清 - 正数表示变慢还是变快？应明确 "↑ slower"
-  2. Figure 4 与周围文字间距约 2-3mm，略紧但可接受
-  3. Table 2 字体约 7-8pt，"Root Cause" 列文字略挤压
+**Page 4:**
+- **Content**: Shape-Aware Compression (§5), Evaluation (§6) start, Table 4 (RAP SVD E2E negative validation)
+- **Specific observations**:
+  - §5.1 includes mathematical notation: "d_pad = ⌈d_orig/a⌉ × a" (rendered with proper ceiling function)
+  - Paragraph mentions "MINIMAL strategy uses a=8", "OPTIMAL uses a=16"
+  - Boxed summary at bottom of page: "Root Cause Summary. Three confirmed causes..." (gray box, ~4 lines)
+  - Table 4: Shows "Misaligned" vs "Repaired" vs "Δ" columns
+  - Table 4 data: Prefill "290.5" → "292.9" → "--0.8%", Decode "1009" → "1000" → "--0.9%"
+- **Issues**:
+  1. Boxed summary uses gray background - good for emphasis, but box width is 0.96\columnwidth causing slight margin asymmetry
+  2. Table 4: Caption is very long (4 lines) for a small 3-column table
+  3. Table 4: The "--0.8%" and "--0.9%" are not bolded, but text emphasizes this is key result
+  4. Page has good vertical balance (no major crowding issues)
 
-**Page 5 (Solution + Evaluation):**
-- **看到的内容**: §5 Shape-Aware Compression, Figure 5 (repair tradeoff scatter plot) 左栏，§6 Evaluation 开始，Table 3 (negative validation RAP SVD), Table 4 (Applicability Framework) 右栏
-- **具体观察**:
-  - §5.1 公式 "$d_{pad} = \lceil d_{orig}/a \rceil \times a$ where $a$ is the alignment target"
-  - **Figure 5**: 散点图 X 轴 "Memory Overhead (%)" 0-20%, Y 轴 "Speedup (%)" 0-35%, 5 个点标注 d=107/114/120/121/125，d=120 用红圈突出显示，两条虚线 "MINIMAL" 和 "OPTIMAL" 趋势线，caption 提到 "d=120 (already 8-aligned, highlighted) shows 0% MINIMAL speedup"
-  - **Table 3**: 3 行 4 列 "Phase | Misaligned | Repaired | Δ", Prefill 行 "290.5 | 292.9 | --0.8%", caption 开头 "Negative validation: RAP SVD E2E (d=102→104)"
-  - **Table 4**: 4 行 4 列 "Architecture Type | SDPA head_dim | Repair Effect | Validated", Direct compression 行 "Misaligned (e.g., d=107) | Yes +86.9% | E2E (§6.2)", caption 开头 "Applicability Framework validated by contrasting experiments"
-- **问题/建议**:
-  1. **Figure 5 信息密度低** - 5 个数据点分布在 0.75\columnwidth × 约 8cm 高度，X/Y 范围内大量空白
-  2. Figure 5 可缩小至 0.45-0.5\columnwidth 节省空间
-  3. Table 3 和 Table 4 布局清晰，字体合适
-  4. d=120 红圈在 Figure 5 中缺少 caption 解释为何突出显示
+**Page 5:**
+- **Content**: Continuation of Evaluation (§6.2-6.4), Table 5 (Positive validation - Direct SDPA), Figure 5 (Repair tradeoff scatter plot), Table 6 (Repair performance details)
+- **Specific observations**:
+  - Table 5: Large table (5 dimensions × 5 columns) showing speedup ranges 78.5%-98.1%
+  - Table 5: "Overall" row shows "86.9%" in bold
+  - Figure 5: Scatter plot with X-axis "Memory Overhead (%)" 0-8, Y-axis "Speedup (%)" 0-30
+  - Figure 5: 6 data points (d=107, 114, 117, 120, 121, 125), two colors (MINIMAL blue, OPTIMAL orange)
+  - Figure 5: d=120 is highlighted with circle annotation
+  - Table 6: Shows "Original (ms)", "Minimal (ms)", "Optimal (ms)", "ΔMin", "ΔOpt" columns
+  - Boxed summary at bottom: "Dual Validation Summary..." (similar gray box as Page 4)
+- **Issues**:
+  1. Figure 5 at 0.75\columnwidth is too large for 6 data points - upper-right quadrant (>15% speedup, >5% overhead) is empty whitespace
+  2. Figure 5 caption: "d=120 (already 8-aligned, highlighted)" - but the highlight is a circle, not immediately obvious
+  3. Table 6: Dimension 120 row shows "0.0%" for ΔMin - good validation point, but not visually emphasized (could bold or color)
+  4. Table 5 and Table 6 both on same page - no issue, but notice Page 6 has severe crowding while Page 5 is well-balanced
+  5. Figure 5: Legend is inside plot area (upper left), could be moved outside to maximize data region
 
-**Page 6 (Evaluation + Related Work):**
-- **看到的内容**: Figure 5 延续至页面顶部，Table 7 (SDPA latency repair) 左栏，§6.3 Accuracy Preservation, §7 Related Work 开始，Table 8 (dimension handling comparison) 右栏
-- **具体观察**:
-  - **Table 7**: 3 行 4 列 "Phys. d | Mem. Ovhd. | Latency (ms±std) | Speedup", 107 行 "0.0% | 2.06±0.06 | 1.00×", 112 行 "4.7% | 1.49±0.04 | 1.39×"
-  - §6.3 段落 "WikiText-2 perplexity validation on RAP SVD (r=0.8, d=102) confirms... baseline 11.08, RAP SVD 92.39, RAP SVD + repair 92.39"
-  - §7 Related Work 左栏段落 "Post-training compression spans multiple paradigms: pruning (SparseGPT), quantization (GPTQ, AWQ, QLoRA, LLM.int8(), SqueezeLLM), low-rank adaptation (LoRA), SVD-based decomposition (PaLU, SVD-LLM, CALDERA)..."
-  - **Table 8**: 9 行 3 列 "System | Supported head_dim | Misaligned handling", FlashAttn-2 行 "Optimized: 32,64,96,128,256 | Slow path (+30-45%)", vLLM 行 "64,80,96,112,128,256 | Error/fallback"
-  - 页面底部约 15-20% 空白区域
-- **问题/建议**:
-  1. **视觉拥挤严重** - Figure 5 + Table 7 + Related Work 密集文字三者挤压，缺少呼吸空间
-  2. **Table 7 数据重复** - 与 Table 6 (Page 5) 完全相同数据（d=107: 2.06→1.49, +27.8%），建议删除节省空间
-  3. **页面底部空白浪费** - 约 15-20% 空白未利用，float placement 问题
-  4. Related Work 段落间距约 1mm，过于紧凑
-  5. Table 8 与上方文字间距不足 (<2mm)
+**Page 6:**
+- **Content**: Applicability Framework (§6.3), Accuracy Preservation (§6.5), Scope and Limitations (§6.6), Related Work (§7) start, Table 7 (Applicability framework), Table 8 (Dimension handling comparison)
+- **Specific observations**:
+  - Table 7 (Applicability Framework): 3 rows × 4 columns, top of page
+  - Table 7: Row 1 "Direct compression" → "Yes +86.9%", Row 2 "Projection-based" → "No --0.8%"
+  - §6.6 Scope and Limitations: Gray box with "L1. Applicability Scope", "L2. Downstream Tasks", "L3. Hardware" (3 items)
+  - Table 8 (Head dimension handling): 3-section table (FlashAttn-2/vLLM/TensorRT, GPTQ/AWQ/PaLU/RAP, This work)
+  - Related Work (§7) starts mid-page with paragraph "LLM Compression. Post-training compression spans..."
+- **Issues**:
+  1. **CRITICAL**: Table 7 and Table 8 are positioned very close together (<1 line of whitespace between them)
+  2. **CRITICAL**: Text around tables feels "squeezed" - margins between text and tables appear <3mm
+  3. **LAYOUT CRISIS**: The section after Table 8 ("Positioning. Unlike prior...") is crammed into ~2 lines before page break
+  4. Table 8: Font size in "Misaligned handling" column appears 8pt but text is long ("Runtime padding", "Error/fallback", "Compile-time fix")
+  5. §6.6 gray box takes significant vertical space (5 lines) - could be reformatted as regular paragraphs to save space
+  6. **Overall page crowding**: This page has the worst visual density in the entire paper - needs major restructuring
 
-**Page 7 (Conclusion):**
-- **看到的内容**: §8 Conclusion 开始，多个小节标题 "Diagnostic contribution", "Validated applicability framework", "H100 Generalization", "Software Version Note", "Integration with Compression Frameworks", "Why Projection-Based Methods Don't Benefit"
-- **具体观察**:
-  - §8 开头 "We presented a systematic measurement and diagnosis study of dimensional collapse—a critical but overlooked problem..."
-  - "H100 Generalization" 段落: "H100's 4th-gen Tensor Cores use m16n8k16 MMA tiles requiring K mod 16 = 0, and FlashAttention-3 still optimizes for {64, 128, 256}"
-  - "Integration checklist" 段落: "(1) Determine architecture type... (2) If direct compression, apply padding... (3) Verify alignment: assert d_out % 8 == 0. (4) Export with aligned dimensions"
-  - "Why Projection-Based Methods Don't Benefit" 段落解释 RAP SVD latent space (d=102) → projection layers restore head_dim=128
-- **问题/建议**:
-  1. Conclusion 占据约 1.5 页（Page 7 + Page 8 上半部分），包含 6 个小节，结构略显松散
-  2. Integration checklist 4 点详细指导更适合 GitHub README 而非论文 Conclusion
-  3. 布局合理，无明显视觉问题
+**Page 7:**
+- **Content**: Continuation of Related Work (§7), Conclusion (§8) start
+- **Specific observations**:
+  - Related Work continues with paragraphs: "Attention Optimization & GPU Kernels", "Inference Frameworks", "GPU Architecture & Tensor Cores", "Dimension Handling Comparison", "Positioning"
+  - Each paragraph is 4-6 lines with dense citations [1,2,3],...[45]
+  - Conclusion starts at bottom 1/4 of page
+  - §8 includes subparagraphs: "H100 Generalization", "Software Version Note", "Integration with Compression Frameworks"
+  - Mathematical notation in §8: "d_pad = ⌈d_orig/a⌉ × a" (repeated from §5)
+- **Issues**:
+  1. Related Work feels list-like rather than narrative - each paragraph is mostly citations with minimal connective text
+  2. §8 "Integration with Compression Frameworks" includes bullet list ("For direct compression...", "For projection-based...", "Integration checklist") - this is new technical content inappropriate for Conclusion
+  3. §8 "Why Projection-Based Methods Don't Benefit" paragraph repeats content from §6.1-6.2 - redundant
+  4. Page vertical balance is good (no crowding), but density feels monotonous (no figures/tables to break up text)
 
-**Page 8 (Conclusion + References):**
-- **看到的内容**: §8 Conclusion 最后部分，"Reproducibility" 段落，References 列表开始
-- **具体观察**:
-  - "Reproducibility" 段落: "Code, experiment scripts, and raw data are available at https://github.com/[ANONYMIZED]. Upon acceptance, we will release..."
-  - References 标题使用 ACM-Reference-Format
-  - 第一条引用 "[1] Dao-AILab. Flash-decoding for long-context inference. 2024."
-  - 可见引用包括 "[10] Dao et al. FlashAttention-2", "[21] PyTorch. Scaled dot product attention", "[31] Yao et al. SVD-LLM"
-  - 双栏排版，引用字体约 7-8pt
-  - 总共 31 篇引用（从页面中可数出的编号推断）
-- **问题/建议**:
-  1. **引用数量严重不足** - 仅 31 篇，EuroMLSys 标准应 ≥45 篇
-  2. Reproducibility 部分 "[ANONYMIZED]" placeholder 是 blind review 标准做法，但应说明将发布哪些 artifacts (code? data? scripts?)
-  3. 缺少关键引用：GPTQ, AWQ, H2O, QUEST, lm-eval-harness, Volta/Ampere GPU whitepapers
+**Page 8:**
+- **Content**: Continuation of Conclusion (§8), References section start
+- **Specific observations**:
+  - §8 final paragraph: "Reproducibility. Code, experiment scripts..." with URL placeholder "\url{https://github.com/[ANONYMIZED]}"
+  - References header appears ~1/3 down the page
+  - **MASSIVE WHITESPACE**: Only 3-4 lines of Conclusion text, then references start, but page is ~60% blank below the references section
+  - References are numbered [1] through [~8] visible on this page (font appears 9pt, good readability)
+  - Reference [1]: "Achiam, Josh, Steven Adler, Sandhini Agarwal..." (GPT-4 paper)
+  - Reference [2]: "Bai, Jinze, et al. 2023. Qwen Technical Report..." (long author list truncated with "et al.")
+- **Issues**:
+  1. **CRITICAL LAYOUT ISSUE**: Page is ~60% blank whitespace in lower half - worst space utilization in entire paper
+  2. This indicates poor float placement parameters in LaTeX - likely Related Work section (§7) is too long and pushing Conclusion, but figures/tables on Pages 5-6 didn't distribute well
+  3. Could easily move one table from Page 6 to Page 8, or restructure §7 to be more concise
+  4. References starting mid-page is unusual - typically papers adjust content to start references at top of page for cleaner appearance
+
+**Page 9:**
+- **Content**: References continuation
+- **Specific observations**:
+  - Two-column layout with references [~9] through [~30] (approximate, based on typical reference density)
+  - Reference formatting appears correct: Author, Year, Title, Venue/URL
+  - Font size ~9pt, line spacing ~10pt (standard for references)
+  - No figures, tables, or other content - pure reference list
+- **Issues**:
+  1. No visual issues observed - references are well-formatted and readable
+  2. Reference count appears to be ~46 total based on text analysis (see M3 for literature depth concern)
+
+**Page 10:**
+- **Content**: References continuation to end
+- **Specific observations**:
+  - Final references [~31] through [46]
+  - Reference [44]: "Gyeong-In Yu, Joo Seong Jeong... ORCA: A Distributed Serving System for Transformer-Based Generative Models. In OSDI."
+  - Reference [45]: "Zhenyu Zhang, Yang Sheng... H2O: Heavy-Hitter Oracle for Efficient Generative Inference of Large Language Models..."
+  - Reference [46]: "Yilong Zhao, Chien-Yu Xu... ATOM: Low-bit Quantization for Efficient and Accurate LLM Serving. In MLSys."
+  - Page ends with references, no appendix or supplementary content visible
+  - **LARGE WHITESPACE**: Bottom ~40% of Page 10 is blank (similar to Page 8)
+- **Issues**:
+  1. **CRITICAL**: Large blank space at bottom suggests content could be reorganized to better utilize space
+  2. Combined with Page 8's 60% blank space, suggests paper has poor space distribution - pages 6-7 are overcrowded while 8, 10 are underutilized
+  3. This is fixable with better LaTeX float placement and possibly moving some content from §7 to earlier sections
+
+---
 
 ### Figure-by-Figure Assessment
 
-| Figure | 位置 | 你观察到的具体内容 | 尺寸评估 | 布局评估 | 问题 |
-|--------|------|-------------------|---------|---------|------|
-| Fig 1 | Page 2 右栏 | 双面板：(a) 两柱对比 1.14ms vs 2.14ms, (b) 流程图 "Unconstrained SVD → 96.9% misaligned → Repair → Recovery"，配色蓝/橙，caption 7 行 | 稍大 | Caption 间距 <2mm | Caption 过长与 figure 贴近；面板 (a) 双柱简单占 40% 列宽可缩小 |
-| Fig 2 | Page 3 左栏 | 折线图 X: Head Dim 64-160, Y: Latency 0-2.5ms, 蓝色点+error bars, 橙色点 d=107 标注 "2.19ms"，图例可见 | 合适 | 正常 | 数据标签 "2.19ms" 橙色字与橙色线重叠，对比度不足；轴标签约 7-8pt 接近下限 |
-| Fig 3 | Page 3 右栏 | 柱状图 X: Dim 114-125, Y: Percentage 0-20%, 红色横幅 "THEORETICAL ANALYSIS", 柱顶标注百分比，总宽 0.85\columnwidth | **过小** | 与 Section 3.2 间距 <3mm | KEY RESULT 但柱细、标签 6-7pt 难辨认，应放大至 \columnwidth；红色 banner 占 20% 高度浪费 |
-| Fig 4 | Page 4 左栏 | 水平条形图 4 bars: TC +58% (红), Vec +50% (红), SDPA +40% (红), L2 +5.8% (灰)，Y 轴 "Performance Impact (%)" | 合适 | 与文字间距 2-3mm (略紧) | Y 轴标签语义不清（正数=慢？）应明确 "↑ slower"；缺少 error bars 尽管有 5-8% variance |
-| Fig 5 | Page 5-6 左栏 | 散点图 X: Mem Ovhd 0-20%, Y: Speedup 0-35%, 5 点 (d=107/114/120/121/125), d=120 红圈突出，虚线 MINIMAL/OPTIMAL，宽约 0.75\columnwidth | **过大** | 侵入 Page 6 导致拥挤 | 5 点占 0.75 列宽 × 8cm 高信息密度低，大量空白；建议缩至 0.45\columnwidth；d=120 红圈缺 caption 解释 |
+| Figure | 位置 | 具体观察内容 | 尺寸评估 | 布局评估 | 问题 |
+|--------|------|-------------|---------|---------|------|
+| Fig 1 | Page 1 | Title "Dimensional collapse overview", two-part diagram (a)/(b), each part has colored box (orange/blue), simple arrow diagram inside, caption 6 lines long | **过大** | 正常 | (1) Full columnwidth for 2 simple boxes is oversized, (2) 40% internal whitespace, (3) Caption too long for simple diagram |
+| Fig 2 | Page 2 | Line plot, X-axis "Head Dimension" 64-160, Y-axis "Latency (ms)" 0-2.5, blue/orange lines, data points labeled "1.14ms", "2.19ms", error bars barely visible | 合适 | 正常 | (1) Orange label "2.19ms" overlaps line marker, (2) Y-axis tick labels ~7pt too small, (3) Error bars too thin to see |
+| Fig 3 | Page 2 | Histogram, X-axis dimensions 114-125, Y-axis "# of Heads", red "THEORETICAL ANALYSIS" banner, bin labels 114-125 | 合适 | 正常 | (1) Bin labels ~6-7pt too small, (2) No visual threshold for 8-alignment, (3) Banner text ~8pt borderline |
+| Fig 4 | Page 3 | Horizontal bar chart, 4 bars (Tensor Core, Vectorized, Bandwidth, L2), X-axis 0-70%, bars colored red/blue/orange/gray, labels "Confirmed"/"Not Confirmed" | 合适 | 正常 | (1) Color scheme inconsistent with Fig 2, (2) X-axis could be 0-60% for better space use, (3) Bar labels use mixed fonts |
+| Fig 5 | Page 5 | Scatter plot, X-axis "Memory Overhead (%)" 0-8, Y-axis "Speedup (%)" 0-30, 6 data points (d=107,114,117,120,121,125), legend "MINIMAL"/"OPTIMAL", d=120 circled | **过大** | 正常 | (1) 0.75\columnwidth too large for 6 points, (2) Upper-right quadrant empty (>15% speedup, >5% overhead), (3) Legend inside plot wastes space |
+| Table 2 | Page 3 | SDPA backend latency, 5 rows × 4 columns, d=107 row bolded, footnote about MEM_EFFICIENT N/A | 合适 | 正常 | (1) No major issues, well-formatted |
+| Table 3 | Page 3 | Hardware root causes, 4 rows × 4 columns, shows H1-H4 hypothesis, "Confirmed"/"Not confirmed", impact percentages | 合适 | 正常 | (1) "Root Cause" column text compressed, (2) Percentage precision inconsistent (58%, 5.8%, 40%, 50%) |
+| Table 4 | Page 4 | RAP SVD E2E, 3 rows × 3 columns, shows Misaligned/Repaired/Δ, negative results --0.8%/--0.9% | 合适 | 正常 | (1) Caption 4 lines for small table, (2) Key result --0.8% not bolded |
+| Table 5 | Page 5 | Direct SDPA validation, 6 rows × 5 columns, shows speedup ranges 78.5%-98.1%, "Overall" row with 86.9% | 合适 | 正常 | (1) No major issues, data is clear |
+| Table 6 | Page 5 | Repair performance, 6 rows × 5 columns, shows Original/Minimal/Optimal latency, ΔMin/ΔOpt percentages | 合适 | 正常 | (1) d=120 validation point (0.0% ΔMin) not visually emphasized |
+| Table 7 | Page 6 | Applicability framework, 3 rows × 4 columns, architecture types vs. repair effect, validated by experiments | 合适 | **侵入正文** | (1) CRITICAL: <1 line gap to Table 8 below, (2) Text margins <3mm, (3) Part of Page 6 crowding crisis |
+| Table 8 | Page 6 | Dimension handling comparison, 3-section table (systems/compression methods/this work), 3 columns | 合适 | **侵入正文** | (1) CRITICAL: <1 line gap to Table 7 above, (2) Long text in "Misaligned handling" column (~8pt), (3) Contributes to Page 6 crowding |
 
-### Table Assessment
+---
 
-| Table | 你观察到的具体内容 | 问题 |
-|-------|-------------------|------|
-| Table 1 | Page 3 右栏，5 行 4 列 "d | AUTO | FLASH | MEM_EFF | MATH"，d=107 行加粗 "2.14±0.06 | 2.14±0.06 | N/A* | 27.0±0.2"，footnote "*MEM_EFFICIENT unavailable: strict 8-alignment" | ±std 使用 \scriptsize (~6pt) 打印难读，建议改为 \small 或移至 footnote |
-| Table 2 | Page 4 右栏，4 行 4 列 "Hypothesis | Status | Impact | Root Cause"，H1 行 "H1: TC K%16 | Confirmed | 58% | Util. 30%→12%" | 布局清晰，字体 7-8pt 可接受，"Root Cause" 列文字略挤但可读 |
-| Table 3 | Page 5 右栏，3 行 4 列 "Phase | Misaligned | Repaired | Δ"，Prefill 行 "290.5 | 292.9 | --0.8%"，caption "Negative validation: RAP SVD E2E" | 清晰简洁，无问题 |
-| Table 4 | Page 5 右栏，4 行 4 列 "Architecture | SDPA head_dim | Repair Effect | Validated"，Direct 行 "Misaligned (d=107) | Yes +86.9% | E2E (§6.2)" | 清晰，KEY TABLE 提供 actionable guidance，布局良好 |
-| Table 6 | Page 5 右栏 | （注：原 review 提到 Table 6，但 Page 5 实际只有 Table 3/4。可能是编号错误，应为 Table 5？）| 需确认 table 编号一致性 |
-| Table 7 | Page 6 左栏，3 行 4 列 "Phys. d | Mem. Ovhd. | Latency | Speedup"，107 行 "0.0% | 2.06±0.06 | 1.00×" | **数据与 Table 6 完全重复**（d=107: 2.06→1.49, +27.8%），建议删除节省空间 |
-| Table 8 | Page 6 右栏，9 行 3 列 "System | Supported head_dim | Misaligned handling"，vLLM 行 "64,80,96,112,128,256 | Error/fallback" | 有用对比，但 vLLM 行缺 citation/link；与上方文字间距 <2mm |
-
-### Layout Assessment (布局评估)
+### Layout Assessment (布局评估 - MANDATORY)
 
 **整体页面利用率**：
-- **大片空白未利用**: Page 6 底部约 15-20% 空白（float placement 问题）
-- **图片尺寸与信息量不匹配**: Figure 5 (5 点) 占 0.75 列宽信息密度低；Figure 3 (KEY RESULT) 只有 0.85 列宽信息密度高但尺寸小
+- **大片空白位置**: Page 8 (~60% blank below references), Page 10 (~40% blank at bottom)
+- **图片尺寸与信息量不匹配**: Figure 1 (full columnwidth for 2 boxes), Figure 5 (0.75 columnwidth for 6-point scatter plot)
 
 **图文冲突检查**：
-- **侵入正文空间**: Figure 1 caption 与 figure 底部 <2mm；Figure 3 与 Section 3.2 标题 <3mm；Figure 5 侵入 Page 6 挤压 Related Work
-- **图片与 caption/其他元素重叠**: 无直接重叠，但间距紧张
-- **双栏单栏图片过大**: Figure 1 (~\columnwidth) 和 Figure 5 (0.75\columnwidth) 可缩小 25-40%
+- **图片侵入正文空间**: No direct intrusion observed, but Page 6 has severely cramped text-to-table margins (<3mm visually)
+- **图片与caption/其他元素重叠**: No overlap observed
+- **双栏排版中单栏图片过大**: Not applicable (all figures are single-column width)
 
 **尺寸问题图片列表**：
+
 | 图片 | 问题类型 | 具体描述 | 建议修改 |
 |------|---------|---------|---------|
-| Fig 1 | 过大/信息密度低 | 双面板 (a) 简单双柱 + (b) 简单流程占 ~\columnwidth，30-40% 空白 | 缩至 0.7\columnwidth，精简 caption 至 5 行，增加与底部间距至 3mm |
-| Fig 3 | 过小 | KEY RESULT "96.9% misaligned" 但 0.85\columnwidth 导致柱细、标签 <7pt | 放大至 \columnwidth，移除/缩小红色 banner 节省 20% 高度 |
-| Fig 5 | 过大/信息密度低 | 5 点散布在 0.75\columnwidth × 8cm，X/Y 范围内大量空白 | 缩至 0.45-0.5\columnwidth，考虑合并 d 值为单图而非 scatter |
-| Fig 4 | 合适但轴标签不清 | 水平条形图 4 bars 尺寸适中 | Y 轴添加 "↑ slower" 明确方向，增加 error bars 或 footnote |
+| Figure 1 | 信息密度低/过大 | Full columnwidth (~8.5cm) for 2 simple boxes with ~3 lines text each, ~40% internal whitespace | Reduce to 0.65\columnwidth, recovers ~1.5cm vertical space (~3-4 lines text) |
+| Figure 5 | 过大 | 0.75\columnwidth (~6.4cm) for 6-point scatter plot, upper-right quadrant completely empty | Reduce to 0.55\columnwidth, recovers ~1cm space (~2-3 lines text) |
+| Table 7 + Table 8 | 布局冲突 | Two tables on Page 6 with <1 line gap, text margins <3mm, severe crowding | Consolidate into single table OR move Table 8 to Page 7 |
+| Page 6 gray box | 空间效率低 | §6.6 Limitations uses gray box format taking 5 lines for 3 bullet points | Reformat as normal paragraph, save ~1-2 lines |
+
+**空间分配建议**：
+1. **Page 1-5**: Generally good balance, minor tweaks (Fig 1, Fig 5 resize) would improve
+2. **Page 6**: **CRITICAL PROBLEM** - severe crowding, tables too close, text margins insufficient
+   - Fix: Consolidate Tables 7-8 OR move one table to Page 7 OR reformat §6.6 box as paragraph
+3. **Page 7**: Good balance, dense text but no crowding issues
+4. **Page 8-10**: **CRITICAL PROBLEM** - massive unused whitespace (Page 8: ~60%, Page 10: ~40%)
+   - Fix: Move content from Page 6-7 to better distribute across pages, OR adjust LaTeX float placement parameters
+
+**LaTeX修改建议**：
+```latex
+% 在 preamble 添加更宽松的 float placement
+\renewcommand{\topfraction}{0.85}
+\renewcommand{\bottomfraction}{0.85}
+\renewcommand{\textfraction}{0.15}
+\renewcommand{\floatpagefraction}{0.7}
+
+% 在 §6.6 之前添加 FloatBarrier 防止 table 漂移
+\usepackage{placeins}
+\FloatBarrier  % before §6.6 Scope and Limitations
+
+% 合并 Table 7 和 Table 8 为单个紧凑表格
+% 或将 Table 8 移动到 §7 Related Work 段落内
+```
+
+---
 
 ### Visual Issues Summary
 
-**必须列出至少 5 个视觉问题**（已找出 10+ 个）：
+**必须列出至少 5 个视觉问题** (已列出 10 个)：
 
-1. **Figure 5 信息密度过低** (Page 5-6): 5 个数据点占据 0.75\columnwidth × 约 8cm 高度，X 轴 0-20% Y 轴 0-35% 范围内大量空白区域。建议缩小至 0.45\columnwidth 或合并为单图。
-
-2. **Figure 3 尺寸不足** (Page 3): KEY RESULT "96.9% misaligned" 的柱状图仅 0.85\columnwidth，导致柱子过细、百分比标签约 6-7pt 难以辨认。红色横幅 "THEORETICAL ANALYSIS" 占据 20% 图高浪费空间。建议放大至 \columnwidth，移除/缩小 banner。
-
-3. **Page 6 视觉拥挤** (Page 6): Figure 5 延续 + Table 7 + Related Work 密集文字三者挤压，段落间距 <1mm，缺少呼吸空间。同时页面底部有 15-20% 空白未利用（float placement 矛盾）。建议删除 Table 7（数据重复）或移至 float page，或在 §7 前添加 \clearpage。
-
-4. **Figure 1 Caption 间距不足** (Page 2): Caption 7 行文字与 figure 底部间距 <2mm，视觉上贴近。建议精简 caption 至 5 行或在 `\caption{}` 前添加 `\vspace{2mm}`。
-
-5. **Figure 2 标签颜色对比不足** (Page 3): 橙色数据点标签 "2.19ms" 使用橙色文字覆盖在橙色折线上，对比度不足难以阅读。建议改用黑色文字 + 白色背景框或将标签偏移至线外。
-
-6. **Table 7 数据重复** (Page 6): 与 Table 6 (Page 5) 数据完全相同（d=107: 2.06±0.06 → 1.49±0.04, +27.8%）。删除可节省约 3cm 垂直空间缓解 Page 6 拥挤。
-
-7. **Related Work 引用密度低** (Page 6): §7 Related Work 仅 0.5 页篇幅，31 篇引用，明显低于 EuroMLSys 标准 (45-60 篇)。段落间距 <1mm 显得紧凑，缺少与 GPTQ/AWQ 等关键方法的对比讨论。
-
-8. **Figure 3 与 Section 3.2 间距不足** (Page 3): "Scope and Dimension Distribution" 标题紧贴 Figure 3 底部，margin <3mm。建议在标题前添加 `\vspace{3mm}`。
-
-9. **Table 1 字体过小** (Page 3): ±std 值使用 \scriptsize (~6pt)，打印时难以阅读。建议改为 \small 字体或将 std 移至 footnote。
-
-10. **Figure 4 Y 轴标签语义不清** (Page 4): "Performance Impact (%)" 中正数表示变慢还是变快不明确，且缺少 error bars 尽管 §3.1 提到 5-8% variance。建议明确标注 "↑ slower" 或使用 diverging color scheme。
+1. **Page 6 Tables 7-8 crowding**: <1 line gap between tables, text margins <3mm, severe visual crowding affecting readability
+2. **Figure 1 oversized**: Full columnwidth for 2 simple boxes wastes ~1.5cm vertical space, information density mismatch
+3. **Figure 5 oversized**: 0.75\columnwidth for 6-point scatter wastes ~1cm space, upper-right quadrant empty
+4. **Figure 2 label overlap**: Orange data label "2.19ms" overlaps with line marker, hard to distinguish
+5. **Figure 3 font size**: Histogram bin labels (114-125) are ~6-7pt, below 8pt print readability threshold
+6. **Page 8 whitespace crisis**: ~60% of page blank below references, worst space utilization in paper
+7. **Figure 4 color inconsistency**: Uses red/blue/orange/gray scheme, doesn't match blue/orange scheme in Figure 2
+8. **Table 6 validation point**: d=120 row shows 0.0% (key validation) but not visually emphasized with bold/color
+9. **Figure 2 axis labels**: Y-axis tick labels appear 7-8pt, borderline for print readability
+10. **Page 10 whitespace**: ~40% blank at bottom, indicates poor space distribution across pages 6-10
 
 ---
 
 ## Improvement Checklist for Writer Agent
 
 ### High Priority (Must Fix)
-- [ ] **M1: Expand Related Work** - §7 - 添加 15+ 引用（GPTQ, AWQ, H2O, QUEST, lm-eval-harness, GPU whitepapers），扩展至 0.8-1.0 页，添加对比表格
-- [ ] **M2: Resize Figure 3/5** - Figure 3 放大至 \columnwidth; Figure 5 缩小至 0.45\columnwidth - 重新生成 plots
-- [ ] **M3: Fix Page 6 Crowding** - 删除 Table 7（数据重复）或移至 float page `[p]`; 考虑在 §7 前添加 `\clearpage`
-- [ ] **M4: Add H100 Limitation** - §6.4 - 明确说明 "L3. Hardware: All experiments on A100. H100 validation is future work due to hardware availability."
+
+- [ ] **M1 - Fix Page 6 table crowding**: Consolidate Tables 7-8 into single compact table OR move Table 8 to Page 7, ensure ≥2 lines whitespace between floats
+- [ ] **M2 - Resize Figure 1**: Change to `width=0.65\columnwidth` (currently full columnwidth), verify readability after resize
+- [ ] **M2 - Resize Figure 5**: Change to `width=0.55\columnwidth` (currently 0.75), verify data points still visible
+- [ ] **M3 - Expand Related Work literature**: Add 15-20 citations (target 60+ total), include recent surveys (2024), vLLM/TensorRT-LLM system comparisons, historical GPU papers
+- [ ] **M3 - Add historical narrative to Related Work**: 2-3 sentences tracing Tensor Core alignment evolution (Volta 2017 → Ampere 2020 → Hopper 2022)
+- [ ] **M4 - Regenerate all figures with larger fonts**: Axis labels ≥11pt, tick labels ≥9pt, legend ≥9pt
+- [ ] **M4 - Fix color scheme consistency**: Use blue for "aligned", orange for "misaligned" across ALL figures (currently Fig 4 uses different colors)
+- [ ] **M4 - Fix Figure 2 label overlap**: Move "2.19ms" label above marker, add white background box
+- [ ] **Fix Page 8 whitespace**: Adjust LaTeX float placement to better distribute content, or move §7 content to utilize space
 
 ### Medium Priority (Recommended)
-- [ ] **m1: Clarify Abstract** - Abstract line 8 - 改 "45 real SDPA workloads" 为 "45 SDPA benchmark configurations (batch 1-8, seq 512-2048, synthetic QKV)"
-- [ ] **m2: Add Notation Section** - §2 Background - 添加 Notation 定义 $d$, $d_{in}$, $d_{out}$, $B$, $S$, $H$
-- [ ] **m3: Fix Figure 2 Label** - Figure 2 - 数据标签改用黑色文字 + 白色背景框避免与橙色线重叠
-- [ ] **m4: Remove Table 7** - Page 6 - 删除 Table 7（数据重复 Table 6）节省空间
-- [ ] **m5: Fix Figure 4 Axis** - Figure 4 - Y 轴添加 "↑ slower" 明确方向，或添加 error bars/footnote
-- [ ] **m6: Add Baseline Perplexity** - §6.3 - 补充 "Llama-3-8B baseline: 11.08 → RAP SVD: 92.39 (8.3× from compression) → Repair: 92.39"
+
+- [ ] **m1 - Restructure Abstract**: Front-load 86.9% speedup result (currently appears late in abstract)
+- [ ] **m2 - Add visual threshold to Figure 3**: Vertical dashed lines at x=8, 16, 24... showing alignment boundaries
+- [ ] **m3 - Fix Table 3 precision consistency**: Use "58.0%, 5.8%, 40.0%, 50.0%" or all integers "58%, 6%, 40%, 50%"
+- [ ] **m5 - Clarify head_dim vs. d notation**: First mention "attention head dimension $d$ (denoted `head_dim` in code)"
+- [ ] **m6 - Make version disclaimer more prominent**: Add FlashAttention 2.7.4 note to Abstract and Limitations (currently only in Conclusion)
+- [ ] **Emphasize Table 6 d=120 validation**: Bold or color the 0.0% cell to highlight alignment validation
+- [ ] **Fix Figure 4 X-axis range**: Change from 0-70% to 0-60% (largest bar is 58%), better space utilization
+- [ ] **Reformat §6.6 gray box**: Convert to normal paragraph format to save 1-2 lines on Page 6
 
 ### Low Priority (Optional)
-- [ ] Figure 1 Caption 精简至 5 行，增加与 figure 底部间距至 3mm
-- [ ] Figure 3 移除/缩小红色 "THEORETICAL ANALYSIS" banner
-- [ ] Section 3.2 标题前添加 `\vspace{3mm}`
-- [ ] Table 1 ±std 字体改为 \small 或移至 footnote
-- [ ] Table 8 添加 vLLM citation/link
-- [ ] Reproducibility 说明将发布哪些 artifacts
+
+- [ ] **m4 - Rephrase GitHub placeholder**: Change "[ANONYMIZED]" to "will be released upon acceptance"
+- [ ] **Add Figure 5 legend outside plot**: Move legend from inside (upper-left) to outside (below/right) to maximize data region
+- [ ] **Add color coding to Figure 3**: Green bins for 8-aligned (120), red for misaligned
+- [ ] **Shorten Figure 1 caption**: Reduce from 6 lines to 4 lines (remove redundant text)
+- [ ] **Consider renaming "repair"**: Use "alignment" or "padding-based alignment" for more precise terminology
+
+---
+
+## Depth Assessment (NEW)
+
+### Related Work Breadth
+**Score: 5/10**
+- **Citation count**: 46 (target: 60+)
+- **Domain coverage**: 4 areas (Compression, Attention Optimization, Inference Frameworks, GPU Architecture)
+- **Gap**: Missing recent compression surveys (2024), production system internals (vLLM code-level), H100-specific optimization papers
+
+### Historical Context
+**Score: 4/10**
+- **Temporal span**: ~5 years (2019-2024)
+- **Evolution discussion**: Minimal - no clear narrative of "when did this problem emerge?"
+- **Gap**: No discussion of Volta→Ampere→Hopper Tensor Core evolution, no historical analysis of FlashAttention version changes
+
+### Critical Thinking
+**Score: 7/10**
+- **Strengths**: Anticipates "why don't production systems have this problem?" (PaLU enforces alignment), dual validation addresses "when does repair NOT work?"
+- **Gaps**: Doesn't discuss "will future FlashAttention versions fix this internally?", limited discussion of "why hasn't this been published before?"
+
+### Terminology Precision
+**Score: 6/10**
+- **Self-coined terms**: "dimensional collapse" (not established in literature)
+- **Justification**: Minimal - only 1 sentence explaining choice of term
+- **Gap**: Should cite "rank collapse" literature and explicitly distinguish, or use established terms like "dimension misalignment" or "GPU dimension alignment"
+
+### Literature Quality
+**Score: 7/10**
+- **Top venue %**: ~70% from OSDI/SOSP/MLSys/NeurIPS/ICLR (good)
+- **Recent work %**: ~20% from 2024-2025 (low - should be 30-40% for hot topic like LLM compression)
+- **Preprint %**: ~10% arXiv (acceptable)
+
+---
+
+### Depth Bottleneck Identification
+
+**Bottleneck = "Literature Integration"**
+
+**Evidence**:
+1. Only 46 citations vs. typical 60-80 for EuroMLSys systems papers
+2. Related Work (§7) reads like disconnected citation lists, not integrated narrative
+3. No historical evolution discussion (Volta→Ampere→Hopper)
+4. Missing key comparisons: vLLM dimension handling code, TensorRT-LLM padding strategy, FlashInfer requirements
+5. Self-coined terminology "dimensional collapse" without sufficient justification
+
+**Suggested Action**:
+**LITERATURE_EXPANSION task (HIGH priority)**
+- Add 15-20 citations targeting:
+  - LLM compression surveys (ACM Computing Surveys 2024, arXiv surveys)
+  - Production system internals (vLLM GitHub, TensorRT-LLM docs)
+  - GPU architecture evolution (Volta/Ampere/Hopper whitepapers)
+  - Recent FlashAttention variants (FlashAttention-3, FlashInfer papers)
+- Rewrite §7 with narrative structure:
+  - "Historical context: Tensor Core alignment emerged with Volta (2017)..."
+  - "Evolution: FlashAttention (2022) introduced dimension-specific kernels..."
+  - "Production systems: vLLM (2023) and TensorRT-LLM (2024) handle misalignment via..."
+  - "Our work fills gap: unconstrained compression methods lack alignment awareness..."
+
+**Impact on scores**:
+- **Writing Quality**: Would improve from 7.5 → 8.5 (scholarly depth perception)
+- **Innovation**: Would improve from 7.5 → 8.0 (clearer positioning vs. prior work)
+- **Overall**: Could push from 7.0 → 7.5-7.8 (closer to "Accept" threshold)
+
+**Priority**: HIGH - This is the single most impactful improvement to lift the paper toward 8/10 "Accept" level.
 
 ---
 
@@ -520,16 +775,15 @@ Solid summary. H100 discussion (lines 619-621) appropriately caveats generalizat
 **Confidence Score:** 4/5
 
 **Expertise Areas:**
-- GPU optimization and Tensor Core programming (CUDA, memory alignment, vectorization)
-- LLM inference systems (FlashAttention, quantization, KV cache optimization)
-- Systems benchmarking methodology and variance analysis
-- MLSys/Systems conference paper reviewing (OSDI, SOSP, EuroSys style)
+- GPU architecture and Tensor Core optimization
+- LLM inference systems (FlashAttention, vLLM, TensorRT)
+- Experimental methodology for systems benchmarking
+- Academic paper presentation standards for top-tier venues
 
 **Limitations:**
-- Cannot verify FlashAttention 2.7.4 internal CUDA kernel dispatch logic (would require source inspection or NCU profiling)
-- Cannot reproduce 45-workload SDPA benchmark without A100 hardware access
-- H100 architectural analysis based on published specs (m16n8k16 MMA tiles), not hands-on validation
-- Unfamiliar with EuroMLSys specific reviewing criteria (assumed similar to OSDI/EuroSys based on SIGPLAN format)
+- Not an expert in SVD-based compression theory (PaLU, RAP internals)
+- Limited hands-on experience with FlashAttention 2.7.4 internal kernel dispatch
+- Cannot independently verify some claims (e.g., "all 24 PaLU checkpoints enforce 32-multiple") without inspecting model files
 
 ---
 

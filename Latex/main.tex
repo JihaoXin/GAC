@@ -460,12 +460,8 @@ This section provides microbenchmark evidence supporting the +86.9\% E2E speedup
 \subsubsection{SDPA Padding Rescue}
 \label{sec:padding}
 
-Table~\ref{tab:padding} shows the effect of padding $d$=107 to aligned values.
-
-%% Table removed to address Page 6 crowding (M3 verification: redundant with Table~\ref{tab:repair_perf})
-%% Original data: d=107: 2.06±0.06 → 1.49±0.04 (112) / 1.51±0.04 (128)
-
-Padding to 112 achieves 27.8\% speedup with only 4.7\% memory overhead---an excellent tradeoff (see Table~\ref{tab:repair_perf} for detailed measurements).
+Padding $d$=107 to aligned values demonstrates significant performance gains.
+Table~\ref{tab:repair_perf} shows detailed measurements: padding to 112 achieves 27.8\% speedup with only 4.7\% memory overhead---an excellent tradeoff.
 
 \subsubsection{GEMM Alignment Impact}
 

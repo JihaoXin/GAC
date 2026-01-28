@@ -1,19 +1,29 @@
 best_score: 7.6
 expected_changes: {}
 issue_history:
-  M1: 49
-  M2: 49
-  M3: 49
-  M4: 49
+  M1: 51
+  M2: 51
+  M3: 51
+  M4: 51
   M5: 1
-  m1: 49
-  m2: 49
-  m3: 49
-  m4: 49
-  m5: 49
-  m6: 49
+  m1: 51
+  m2: 51
+  m3: 51
+  m4: 51
+  m5: 51
+  m6: 51
   m7: 1
 issue_repair_methods:
+  AUTOMATED_SYSTEM_PAUSE:
+  - SYSTEM_CONTROL
+  CONDITIONAL_M1_FIX:
+  - BLOCKED_PENDING_HUMAN_DECISION
+  CONDITIONAL_M2_FIX:
+  - BLOCKED_PENDING_HUMAN_DECISION
+  CONDITIONAL_M3_FIX:
+  - BLOCKED_PENDING_HUMAN_DECISION
+  CONDITIONAL_M4_FIX:
+  - BLOCKED_PENDING_HUMAN_DECISION
   HUMAN_ESCALATION_CHECK:
   - WRITING_ONLY
   M1:
@@ -61,6 +71,8 @@ issue_repair_methods:
   - WRITING_ONLY
   Minor_Batch:
   - EXPERIMENT_REQUIRED
+  SYSTEM_CAPACITY_EXHAUSTED:
+  - HUMAN_ESCALATION_REQUIRED
   VISIBILITY_PACKAGE:
   - WRITING_ONLY
   m1:
@@ -88,11 +100,10 @@ last_issues:
 - M2
 - M1
 - m5
-last_repair_iteration: 14
-last_updated: '2026-01-28T20:27:45.163690'
+last_repair_iteration: 15
+last_updated: '2026-01-28T21:06:43.937503'
 repair_effective: false
 scores:
-- 7.35
 - 7.35
 - 7.35
 - 7.35
@@ -112,4 +123,5 @@ scores:
 - 7.0
 - 7.0
 - 7.25
+- 7.05
 stagnation_count: 1
