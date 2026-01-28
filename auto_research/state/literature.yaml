@@ -1061,5 +1061,256 @@ key_data_points_for_paper:
     - "Tile quantization penalty: up to 1.5x extra FLOPs"
     - "Wave quantization penalty: can halve GFLOPS"
 
+# ===== 2026-01-28 文献调研更新：Related Work 专项 =====
+  - date: "2026-01-28"
+    topic: "related_work_comprehensive"
+    query: "LLM compression SVD low-rank, FlashAttention head dimension, Tensor Core alignment"
+    purpose: "系统性文献调研，支持 Related Work 撰写"
+    findings:
+      # ===== LLM 压缩方法 =====
+      - title: "SVD-LLM: Truncation-aware Singular Value Decomposition"
+        source: "https://arxiv.org/abs/2403.07378"
+        venue: "ICLR 2025"
+        relevance: "核心相关工作 - SVD 压缩方法"
+        key_points:
+          - "Data whitening 技术确保 singular values 直接映射到 compression loss"
+          - "Sequential low-rank approximation 补偿 accuracy degradation"
+          - "高压缩率下优于 ASVD 等方法"
+          - "在 10 datasets, 7 models, 3 LLM families 上验证"
+          - "未讨论 irregular dimension 导致的 GPU 性能问题"
+
+      - title: "LoRC: Low-Rank Compression for LLMs KV Cache"
+        source: "https://arxiv.org/abs/2410.03111"
+        venue: "NeurIPS 2024 ENLSP Workshop"
+        relevance: "另一个 KV cache 低秩压缩方法"
+        key_points:
+          - "使用 SVD 分解 KV weight matrices"
+          - "Progressive compression: 浅层保留更多维度，深层更激进压缩"
+          - "无需重训练，仅需 SVD 分解"
+          - "60% 压缩率下性能接近 full cache"
+          - "提供理论误差界分析"
+          - "同样产生 irregular dimensions"
+
+      - title: "ESPACE: Dimensionality Reduction of Activations"
+        source: "https://proceedings.neurips.cc/paper_files/paper/2024/file/1f6591cc41be737e9ba4cc487ac8082d-Paper-Conference.pdf"
+        venue: "NeurIPS 2024"
+        relevance: "Activation-based 压缩方法"
+        key_points:
+          - "动态 SVD 有运行时开销"
+          - "50% 压缩仅 0.18 perplexity 增加 (GPT3-22B)"
+          - "20-40% 压缩甚至可能提升性能"
+          - "减少 GEMM 执行时间和 prefill latency"
+
+      # ===== FlashAttention 和 GPU 优化 =====
+      - title: "FlashAttention-2: Faster Attention with Better Parallelism"
+        source: "https://tridao.me/publications/flash2/flash2.pdf"
+        venue: "ICLR 2024"
+        relevance: "核心 baseline，head_dim 约束"
+        key_points:
+          - "支持 head_dim <= 256"
+          - "性能最优: head_dim 64 或 128"
+          - "比 FlashAttention-1/xformers 快约 2x"
+          - "A100 上可达理论 FLOPs 的 50-73%"
+          - "head_dim > 192 backward 需要 A100/H100"
+
+      - title: "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision"
+        source: "https://arxiv.org/abs/2407.08608"
+        venue: "arXiv 2024"
+        relevance: "最新 FlashAttention 版本，Hopper 优化"
+        key_points:
+          - "针对 H100 GPU 的异步和低精度优化"
+          - "FP8 支持，需要 k-major layout"
+          - "head_dim 256 后向传播可在消费级 GPU 上运行（无 dropout）"
+          - "默认测试配置: head_dim 64, 128, 256"
+
+      - title: "PyTorch SDPA Backend Selection"
+        source: "https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html"
+        venue: "PyTorch 官方文档"
+        relevance: "核心技术验证 - backend fallback"
+        key_points:
+          - "三种 backend: FlashAttention-2, Memory-Efficient, Math"
+          - "Flash 要求: head_dim % 8 == 0, head_dim <= 128 (built-in)"
+          - "不满足约束自动 fallback 到 Math backend"
+          - "Math backend 比 Flash 慢约 40x"
+
+      # ===== Tensor Core 和 GEMM 优化 =====
+      - title: "NVIDIA Deep Learning Performance Guide - Matrix Multiplication"
+        source: "https://docs.nvidia.com/deeplearning/performance/dl-performance-matrix-multiplication/index.html"
+        venue: "NVIDIA 官方文档"
+        relevance: "核心技术验证 - Tensor Core 对齐"
+        key_points:
+          - "FP16 最优对齐: 8 elements (16 bytes)"
+          - "A100 最优: 64 elements (128 bytes)"
+          - "cuBLAS >= 11.0: 放宽硬性要求但效率仍受影响"
+          - "Tile quantization: 不对齐可导致 1.5x 额外操作"
+          - "Wave quantization: 可导致 GFLOPS 减半"
+
+      - title: "CUTLASS GEMM Tile Size Impact"
+        source: "https://docs.nvidia.com/cutlass/latest/media/docs/cpp/efficient_gemm.html"
+        venue: "NVIDIA CUTLASS 文档"
+        relevance: "GEMM tile 配置影响"
+        key_points:
+          - "Tile 配置可影响性能高达 3.2x"
+          - "小 M/N 维度导致 threadblock 部分计算浪费"
+          - "Split-K 策略用于 K >> M, N 情况"
+          - "Hopper 放宽 K 维度对齐要求"
+
+      - title: "TMA-Adaptive FP8 Grouped GEMM"
+        source: "https://arxiv.org/abs/2508.16584"
+        venue: "arXiv 2025"
+        relevance: "最新消除 padding 的研究"
+        key_points:
+          - "Hopper TMA 约束: 16-byte global, 128-byte shared alignment"
+          - "消除 padding 到固定 alignment 的需求"
+          - "23.8% memory overhead 减少"
+          - "1.7-20.4% 端到端加速"
+
+      # ===== LLM 推理分析 =====
+      - title: "A Systematic Characterization of LLM Inference on GPUs"
+        source: "https://arxiv.org/abs/2512.01644"
+        venue: "arXiv 2025"
+        relevance: "LLM 推理瓶颈系统分析"
+        key_points:
+          - "Prefill: compute-bound, GEMM 主导"
+          - "Decode: memory-bound, GEMV/Flat GEMM"
+          - "FFN-Up: 58% Memory Dependency"
+          - "Attention kernels: L2 hit rate 下降 81.9%"
+
+      - title: "Mind the Memory Gap: GPU Bottlenecks in Large-Batch LLM Inference"
+        source: "https://arxiv.org/abs/2503.08311"
+        venue: "arXiv 2025"
+        relevance: "大批量推理瓶颈分析"
+        key_points:
+          - "大批量推理仍然是 memory-bound"
+          - "DRAM bandwidth saturation 是主要瓶颈"
+          - "Attention 机制是性能瓶颈主因"
+          - "50%+ attention kernel cycles 因数据访问延迟而 stall"
+
+      - title: "FlashDecoding++: Faster LLM Inference"
+        source: "https://proceedings.mlsys.org/paper_files/paper/2024/file/5321b1dabcd2be188d796c21b733e8c7-Paper-Conference.pdf"
+        venue: "MLSys 2024"
+        relevance: "不同 GEMM shapes 需要不同 dataflow"
+        key_points:
+          - "单一静态 dataflow 可导致 50.25% 性能损失"
+          - "异步 softmax + double buffering"
+          - "NVIDIA GPU 上 4.86x speedup"
+          - "说明 GEMM shape 敏感性"
+
+    action_items:
+      - "在 Related Work 分 3 个子节讨论: LLM Compression, Attention Optimization, GPU Performance"
+      - "强调 SVD 方法关注 accuracy preservation，忽视 dimensional collapse"
+      - "引用 NVIDIA 文档说明 Tensor Core 对齐的重要性"
+      - "对比我们的系统性分析与现有 ad-hoc 方案"
+
+# 新增论文引用列表（待添加到 references.bib）
+new_citations_for_paper:
+  svd_compression:
+    - key: "wang2024svdllm"
+      title: "SVD-LLM: Truncation-aware Singular Value Decomposition for Large Language Model Compression"
+      authors: "Xin Wang et al."
+      venue: "ICLR 2025"
+      arxiv: "2403.07378"
+      must_cite: true
+      reason: "核心 SVD 压缩方法"
+
+    - key: "yao2024lorc"
+      title: "LoRC: Low-Rank Compression for LLMs KV Cache with a Progressive Compression Strategy"
+      authors: "Yao et al."
+      venue: "NeurIPS 2024 ENLSP"
+      arxiv: "2410.03111"
+      must_cite: true
+      reason: "另一个 KV cache 低秩方法"
+
+    - key: "chang2024palu"
+      title: "Palu: KV-Cache Compression with Low-Rank Projection"
+      authors: "Chi-Chih Chang et al."
+      venue: "ICLR 2025"
+      arxiv: "2407.21118"
+      must_cite: true
+      reason: "最相关竞争方法，产生 irregular dimensions"
+
+  flashattention:
+    - key: "dao2022flashattention"
+      title: "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
+      authors: "Tri Dao et al."
+      venue: "NeurIPS 2022"
+      must_cite: true
+      reason: "FlashAttention 原论文"
+
+    - key: "dao2023flashattention2"
+      title: "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning"
+      authors: "Tri Dao"
+      venue: "ICLR 2024"
+      arxiv: "2307.08691"
+      must_cite: true
+      reason: "FlashAttention-2，我们实验的 baseline"
+
+    - key: "shah2024flashattention3"
+      title: "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision"
+      authors: "Jay Shah et al."
+      venue: "arXiv 2024"
+      arxiv: "2407.08608"
+      must_cite: false
+      reason: "可选引用，Hopper 优化"
+
+  inference_systems:
+    - key: "kwon2023vllm"
+      title: "Efficient Memory Management for Large Language Model Serving with PagedAttention"
+      authors: "Woosuk Kwon et al."
+      venue: "SOSP 2023"
+      must_cite: true
+      reason: "vLLM，说明 head_dim 约束在生产系统中的重要性"
+
+    - key: "hong2024flashdecoding"
+      title: "FlashDecoding++: Faster Large Language Model Inference on GPUs"
+      authors: "Ke Hong et al."
+      venue: "MLSys 2024"
+      must_cite: true
+      reason: "说明 GEMM shape 敏感性"
+
+  quantization_baselines:
+    - key: "frantar2023gptq"
+      title: "GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers"
+      authors: "Elias Frantar et al."
+      venue: "ICLR 2023"
+      must_cite: true
+      reason: "量化 baseline，不产生 dimensional collapse"
+
+    - key: "lin2024awq"
+      title: "AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration"
+      authors: "Ji Lin et al."
+      venue: "MLSys 2024 Best Paper"
+      must_cite: true
+      reason: "量化 baseline，与 SVD 方法对比"
+
+# 文献调研关键发现总结
+literature_review_summary:
+  main_finding: |
+    现有 LLM 压缩文献（特别是 SVD-based 方法）主要关注 accuracy preservation 和
+    memory reduction，对 dimensional collapse 导致的 GPU 性能问题缺乏系统性分析。
+    我们的论文首次量化这个问题，填补了重要的研究空白。
+
+  supporting_evidence:
+    - evidence: "SVD-LLM 遵循 NVIDIA guideline 将维度 round 到 8 的倍数，但未分析不对齐的代价"
+      source: "SVD-LLM paper"
+
+    - evidence: "Palu 论文展示 1.89x speedup，但未讨论 head_dim 不规则时的性能退化"
+      source: "Palu paper"
+
+    - evidence: "vLLM 硬编码支持的 head_dim 列表，不支持的维度触发 fallback"
+      source: "vLLM GitHub issues"
+
+    - evidence: "FlashDecoding++ 发现不同 GEMM shapes 需要不同 dataflow，单一策略损失 50%"
+      source: "FlashDecoding++ MLSys 2024"
+
+    - evidence: "NVIDIA 文档明确 tile/wave quantization 可导致 1.5-2x 性能损失"
+      source: "NVIDIA Deep Learning Performance Guide"
+
+  research_gap: |
+    1. SVD 压缩方法: 关注 accuracy，ad-hoc 处理维度对齐
+    2. 推理框架 (vLLM, TRT-LLM): 白名单策略，缺乏灵活修复
+    3. GPU 优化研究: 关注 sequence padding，未讨论 head_dim collapse
+    我们的 GAC 方案填补这个空白，提供第一个系统性的维度修复策略。
+
 # 最后更新时间
-last_updated: "2026-01-28T10:30:00"
+last_updated: "2026-01-28T15:00:00"
