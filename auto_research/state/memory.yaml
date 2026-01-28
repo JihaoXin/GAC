@@ -1,23 +1,24 @@
 best_score: 7.6
 expected_changes: {}
 issue_history:
-  M1: 45
-  M2: 45
-  M3: 45
-  M4: 45
+  M1: 47
+  M2: 47
+  M3: 47
+  M4: 47
   M5: 1
-  m1: 45
-  m2: 45
-  m3: 45
-  m4: 45
-  m5: 45
-  m6: 45
+  m1: 47
+  m2: 47
+  m3: 47
+  m4: 47
+  m5: 47
+  m6: 47
   m7: 1
 issue_repair_methods:
   HUMAN_ESCALATION_CHECK:
   - WRITING_ONLY
   M1:
   - FIGURE_CODE_REQUIRED
+  - WRITING_ONLY
   M1_FINAL:
   - EXPERIMENT_REQUIRED
   M1_SCOPE_CLARIFICATION:
@@ -36,6 +37,7 @@ issue_repair_methods:
   - WRITING_ONLY
   M3:
   - LITERATURE_REQUIRED
+  - WRITING_ONLY
   M3_FIGURE_CODE_ANALYSIS:
   - FIGURE_CODE_REQUIRED
   M3_FIGURE_SIZE_LATEX:
@@ -44,6 +46,7 @@ issue_repair_methods:
   - EXPERIMENT_REQUIRED
   M4:
   - FIGURE_CODE_REQUIRED
+  - WRITING_ONLY
   M4_FINAL:
   - EXPERIMENT_REQUIRED
   M4_TABLE3_VISUAL:
@@ -79,8 +82,8 @@ last_issues:
 - M2
 - M1
 - m5
-last_repair_iteration: 12
-last_updated: '2026-01-28T18:59:44.079309'
+last_repair_iteration: 13
+last_updated: '2026-01-28T19:58:51.714265'
 repair_effective: false
 scores:
 - 7.35
@@ -91,9 +94,9 @@ scores:
 - 7.35
 - 7.35
 - 7.35
-- 7.35
 - 7.15
 - 6.95
+- 7.0
 - 7.0
 - 7.0
 - 7.0
