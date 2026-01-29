@@ -2,87 +2,64 @@ best_score: 7.6
 expected_changes: {}
 experiment_empty_count: 0
 issue_history:
-  M1: 7
-  M2: 7
-  M3: 7
-  M4: 7
-  M5: 1
-  m1: 7
-  m2: 7
-  m3: 7
-  m4: 7
-  m5: 7
-  m6: 7
-  m7: 2
+  M1: 4
+  M2: 4
+  M3: 4
+  M4: 4
+  m1: 4
+  m2: 4
+  m3: 4
+  m4: 4
+  m5: 4
+  m6: 4
 issue_repair_methods:
   M1:
-  - FIGURE_CODE_REQUIRED
-  - WRITING_ONLY
-  - EXPERIMENT_REQUIRED
   - LITERATURE_REQUIRED
   - LITERATURE_REQUIRED
   M2:
   - WRITING_ONLY
-  - EXPERIMENT_REQUIRED
   - FIGURE_CODE_REQUIRED
-  - WRITING_ONLY
   M3:
-  - LITERATURE_REQUIRED
-  - WRITING_ONLY
   - EXPERIMENT_REQUIRED
-  - FIGURE_CODE_REQUIRED
-  - FIGURE_CODE_REQUIRED
+  - WRITING_ONLY
   M4:
-  - FIGURE_CODE_REQUIRED
   - WRITING_ONLY
-  - EXPERIMENT_REQUIRED
-  - LITERATURE_REQUIRED
   - WRITING_ONLY
   m1:
   - WRITING_ONLY
-  - FIGURE_CODE_REQUIRED
-  - FIGURE_CODE_REQUIRED
+  - WRITING_ONLY
   m2:
   - WRITING_ONLY
   - FIGURE_CODE_REQUIRED
-  - FIGURE_CODE_REQUIRED
   m3:
-  - WRITING_ONLY
   - WRITING_ONLY
   - WRITING_ONLY
   m4:
   - WRITING_ONLY
   - WRITING_ONLY
-  - WRITING_ONLY
   m5:
-  - WRITING_ONLY
   - WRITING_ONLY
   - WRITING_ONLY
   m6:
   - WRITING_ONLY
   - WRITING_ONLY
-  - WRITING_ONLY
 last_issues:
-- M3
-- m7
-- M2
-- m4
 - M1
-- M4
-- m3
-- m6
 - m5
+- m3
+- m4
+- M3
+- M4
 - m1
+- M2
 - m2
-last_repair_iteration: 100
-last_updated: '2026-01-29T15:47:08.829553'
-repair_effective: false
+- m6
+last_repair_iteration: 0
+last_updated: '2026-01-29T22:00:17.611720'
+repair_effective: null
 scores:
-- 7.0
-- 7.0
-- 7.0
-- 7.0
 - 7.0
 - 6.95
 - 6.85
+- 6.95
 stagnation_count: 3
