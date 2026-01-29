@@ -1,334 +1,476 @@
-review_iteration: 19
-created_at: "2026-01-28T15:00:00.000000"
-planner_summary: |
-  🛑 SYSTEM CAPACITY EXHAUSTED - HUMAN ESCALATION REQUIRED
-
-  CRITICAL STATUS REPORT:
-  - Iterations: 55 rounds (ALL standard methods exhausted)
-  - Current Score: 7.0/10 (meets EuroMLSys "Weak Accept" threshold ~6.5-7.0)
-  - Issue Repetitions: ALL issues repeated 55+ times
-  - Bottleneck: Paper Presentation (6.0/10) - SUBJECTIVE AESTHETIC JUDGMENTS
-
-  AUTOMATED SYSTEM LIMITATIONS REACHED:
-
-  The reviewer identifies valid presentation issues:
-  1. Figure size imbalance (Fig 5 too large, Fig 4 too small)
-  2. Page whitespace (Pages 6, 8, 10 have blank areas)
-  3. Related Work shallow (46 citations, needs critical analysis)
-
-  However, these are SUBJECTIVE AESTHETIC PROBLEMS requiring:
-  - Professional LaTeX typesetter (manual float placement tuning)
-  - Graphic designer (typography judgment, visual balance)
-  - GPU systems scholar (critical literature synthesis)
-
-  AUTOMATED METHODS CANNOT RELIABLY SOLVE THESE:
-  - LaTeX float placement is non-deterministic (depends on page breaks)
-  - "Professional polish" has no objective metric
-  - Critical scholarly analysis requires deep domain expertise
-
-  HONEST ASSESSMENT:
-
-  This paper represents the CEILING of automated research systems:
-
-  ✅ Successfully achieved (55 iterations):
-  - Designed and executed 8+ GPU experiments (A100)
-  - Generated complete 6-page technical paper
-  - Created 6 figures via Python scripts
-  - Added 46 citations through literature search
-  - Validated with dual E2E experiments (RAP SVD -0.8%, Direct SDPA +86.9%)
-  - Reached 7.0/10 score (Weak Accept threshold)
-
-  ❌ Cannot reliably automate:
-  - Subjective aesthetic judgment (layout, typography)
-  - Scholarly critical synthesis (vs. information retrieval)
-  - Non-deterministic optimization (LaTeX float visual feedback)
-
-  DECISION: STOP AUTOMATED ITERATION
-
-  Further iteration WITHOUT human input is wasteful. The remaining 0.5-1.0 points
-  require expertise the automated system does not possess.
-
-  This plan creates a SUBMISSION-READY REPORT and STOPS the automated loop.
-
+created_at: '2026-01-29T09:35:00.000000'
 issues:
-  - id: "SYSTEM_CAPACITY_EXHAUSTED"
-    title: "Human Escalation: Create submission-ready report and STOP"
-    type: "HUMAN_ESCALATION_REQUIRED"
-    priority: "critical"
-    status: "pending"
-    description: |
-      The automated research system has exhausted its capabilities after 55 iterations.
-      All standard repair methods (WRITING_ONLY, FIGURE_CODE_REQUIRED, EXPERIMENT_REQUIRED,
-      LITERATURE_REQUIRED) have been tried 55+ times without breaking through the 7.0 plateau.
+- actions:
+  - agent: literature
+    expected_output: literature.yaml 更新，包含 10-15 篇新文献的详细信息
+    status: pending
+    step: 1
+    task: "搜索并整理以下主题的关键文献（目标：找到 10-15 篇高质量引用）：\n1. GPU Tensor Core 对齐要求演化（Volta →\
+      \ Ampere → Hopper）\n2. FlashAttention dimension 优化设计（GitHub issues/技术报告）\n3.\
+      \ PaLU 对齐约束实现细节\n4. vLLM dimension handling 策略\n5. TensorRT implicit padding\
+      \ 开销\n6. Hardware-aware neural network compression surveys (2024-2025)\n7. CUTLASS\
+      \ 设计论文\n8. Roofline model 应用\n9. GPU memory hierarchy 论文\n\n输出格式：\n- 更新 auto_research/state/literature.yaml，添加：\n\
+      \  - bibtex entries\n  - 每篇论文的关键贡献（1-2 句话）\n  - 如何引用到论文中（与哪个段落关联）\n"
+  - agent: writer
+    depends_on:
+    - 1
+    expected_output: Latex/main.tex 和 references.bib 更新，Related Work 扩展至 1.0-1.2 页
+    status: pending
+    step: 2
+    task: "根据 literature.yaml 中的新文献，扩展 Latex/main.tex 的 Related Work (§7, lines 537-601)：\n\
+      \n1. 在 \"Hardware Alignment Evolution\" 段落后，新增段落 \"Evolution of Alignment Constraints\"\
+      （6-8 句话）：\n   - 描述 Volta (2017, K%8) → Ampere (2020, K%16) → Hopper (2023, TMA)\
+      \ 的演化\n   - 引用 NVIDIA whitepapers 和技术文档\n   - 解释为什么约束逐渐收紧\n\n2. 扩展 \"Why Prior\
+      \ Work Missed Alignment\" 段落（从当前约 4 句增至 8-10 句）：\n   - 添加 PaLU 32-multiple 选择的可能原因（empirical\
+      \ profiling）\n   - 对比 GPTQ/AWQ 的固定宽度组设计\n   - 添加 vLLM 的硬编码维度列表 vs. 本文的形式化框架\n\
+      \   - 引用具体的 GitHub issues 或技术文档\n\n3. 在 Related Work 最后，新增段落 \"Anticipating\
+      \ Criticisms\"（6-8 句话）：\n   - 回答：\"如果生产系统已经解决，为什么需要这篇论文？\"\n   - 强调三重贡献：(1)\
+      \ 系统诊断指导，(2) 揭示 why 而非 that，(3) 适用性框架\n   - 引用 Table 3 (Applicability Framework)\n\
+      \n4. 添加引用到 references.bib（从 literature.yaml 复制 bibtex）\n\n预期效果：\n- 引用数从 46 增至\
+      \ 56-60\n- Related Work 长度从 0.8 页增至 1.0-1.2 页\n- 批判性深度从 \"弱\" 提升至 \"中等\"\n"
+  depends_on: []
+  description: 'Related Work 仅 46 篇引用，列举式呈现，缺乏批判性分析和历史脉络。
 
-      Remaining issues are SUBJECTIVE AESTHETIC JUDGMENTS beyond automated system capabilities:
-      - Professional LaTeX typography (non-deterministic float placement)
-      - Graphic design polish (visual balance, "professional feel")
-      - Scholarly critical literature synthesis (vs. citation retrieval)
+    需要增加 10-15 篇关键文献，扩展 3 个段落：
 
-      Current score (7.0/10) MEETS EuroMLSys acceptance threshold.
+    1. Evolution of Alignment Constraints (Volta → Ampere → Hopper)
 
-      This issue creates a comprehensive SUBMISSION_READY_REPORT.md documenting:
-      - What was achieved (experiments, paper, validation)
-      - What remains (aesthetic polish requiring human expertise)
-      - Decision options (submit as-is vs. hire experts vs. find co-authors)
+    2. Why Prior Work Missed Alignment (PaLU, GPTQ/AWQ 的设计选择)
 
-      After creating the report, the automated system will STOP iteration.
+    3. Anticipating Criticisms (回应贡献新颖性质疑)
 
-    actions:
-      - step: 1
-        agent: "writer"
-        task: |
-          Create comprehensive submission-ready report: SUBMISSION_READY_REPORT.md
+    '
+  id: M1
+  inner_loop_count: 0
+  max_inner_loops: 2
+  priority: high
+  status: completed
+  title: Related Work 文献深度和批判性不足
+  type: LITERATURE_REQUIRED
+- actions:
+  - agent: writer
+    expected_output: "Latex/main.tex line 534 更新，添加 \vspace{3mm}"
+    status: pending
+    step: 1
+    task: '修改 Latex/main.tex 的 Related Work section (line 534)，
 
-          Include the following sections (detailed content in action_plan meta_notes):
+      在 \section{Related Work} 前添加垂直间距：
 
-          # Paper Submission Status Report
 
-          ## Executive Summary
-          - Paper: When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
-          - Target: EuroMLSys 2025 (SIGPLAN, 6 pages)
-          - Current Score: 7.0/10 (Weak Accept threshold: ~6.5-7.0)
-          - Status: ✅ MEETS ACCEPTANCE THRESHOLD
-          - Automated Iterations: 55 rounds
+      ```latex
 
-          ## Current Strengths (Why Accept)
-          Table with dimensions:
-          - Technical Quality: 7.5/10 (rigorous root cause diagnosis)
-          - Innovation: 7.0/10 (first comprehensive study)
-          - Writing Quality: 8.0/10 (clear, honest about limitations)
-          - Paper Presentation: 6.0/10 (BOTTLENECK - aesthetic issues)
+      \FloatBarrier  % Contain evaluation figures/tables
 
-          Key Contributions:
-          - 88% SDPA latency overhead measured
-          - 3 root causes identified (TC 58%, Vec 50%, SDPA BW 40%)
-          - Dual validation: RAP SVD -0.8% (negative), Direct SDPA +86.9% (positive)
-          - Honest negative results demonstrate integrity
 
-          ## Remaining Weaknesses (Aesthetic, Not Technical)
-          Paper Presentation (6.0/10) issues:
-          1. Page 6 Layout: ~40% blank space (LaTeX float placement)
-          2. Figure 4 Size: Reviewer judges "too small" (subjective typography)
-          3. Related Work Depth: Needs critical analysis vs. list-style
-          4. Page 8/10 Whitespace: ~50-60% blank
+      \vspace{3mm}  % Add breathing space before Related Work section
 
-          These require HUMAN EXPERTISE:
-          - Professional LaTeX typesetter
-          - Graphic designer
-          - GPU systems scholar for literature synthesis
 
-          ## What Automated System Achieved
-          Experiments Executed (all on A100):
-          - S1/S2: SDPA latency sweeps
-          - G3/G4: GEMM alignment experiments
-          - C21/C23: Hardware root cause isolation
-          - RAP SVD E2E: Negative validation (-0.8%)
-          - Direct SDPA E2E: Positive validation (+86.9%)
-          - Perplexity: WikiText-2 validation
+      \section{Related Work}
 
-          Paper Development:
-          - 6-page paper (647 lines LaTeX)
-          - 46 citations
-          - 6 figures (Python-generated)
-          - 9 tables
-          - Complete validation framework
+      \label{sec:related}
 
-          Iteration History:
-          - 55 rounds of review → revise
-          - ALL methods tried 55+ times
-          - Score: 6.8 → 7.35 (peak) → 7.0 (current)
-          - Plateaued for 19 iterations
+      ```
 
-          ## What Automated System Cannot Do
-          Limitations:
-          1. LaTeX Float Placement Tuning (non-deterministic, visual feedback needed)
-          2. Professional Graphic Design (subjective "polish", no objective metric)
-          3. Scholarly Critical Analysis (deep expertise, writing craft)
 
-          ## Decision Options
+      这是直接的 LaTeX 修改，不需要重新生成图表。
 
-          ### Option A: Submit As-Is ✅ RECOMMENDED
-          Rationale:
-          - 7.0/10 meets "Weak Accept" threshold
-          - Technical merit is strong (7.5/10 Technical Quality)
-          - Presentation issues are aesthetic, not content-related
-          - Can address polish in camera-ready if accepted
+      '
+  - agent: writer
+    depends_on:
+    - 1
+    expected_output: main.pdf 更新，Page 6 布局改善
+    status: pending
+    step: 2
+    task: '重新编译 LaTeX 并验证：
 
-          Pros:
-          - Fast submission (ready now)
-          - No additional cost
-          - Technical merit stands on its own
+      1. Page 6 Related Work 与上方 Limitations 间距是否增加到 ≥ 5mm
 
-          Cons:
-          - May receive "weak accept" vs "accept"
-          - Reviewers may request presentation improvements
+      2. 内容是否仍然正常排版（没有溢出到下一页）
 
-          Action: Submit to next EuroMLSys deadline
 
-          ### Option B: Human Polish Pass (If Time/Budget Permits)
-          Estimated improvement: 7.0 → 7.5-7.8
+      如果间距仍不足，考虑将 Table 6 移至 Page 7。
 
-          Services Needed:
-          1. Professional LaTeX Typesetter ($200-500, 1 week)
-             - Fix page whitespace
-             - Optimize figure positioning
-             - Impact: Presentation 6.0 → 7.0 (+0.3 total)
 
-          2. Academic Editor for Related Work ($500-1000, 1-2 weeks)
-             - Rewrite §7 with critical analysis
-             - Add historical context
-             - 15-20 additional citations
-             - Impact: +0.2-0.3 total score
+      命令：
 
-          3. Graphic Designer ($300-700, 1 week) - OPTIONAL
-             - Refine Figure 4 size
-             - Unify color schemes
-             - Impact: +0.1-0.2 total score
+      cd Latex && pdflatex main.tex && pdflatex main.tex
 
-          Total Cost: $1000-2200
-          Total Time: 2-3 weeks
-          Expected Score: 7.5-7.8/10
+      '
+  depends_on: []
+  description: 'Page 6 右栏中 Related Work 与 Limitations 文本框垂直间距约 2mm，低于推荐的 5mm。
 
-          ### Option C: Co-Author Collaboration
-          Recruit co-authors with:
-          - GPU systems literature expertise
-          - Strong academic writing background
-          - LaTeX/typography experience
+    这是 LaTeX 排版问题，但由于已尝试 WRITING_ONLY 无效（重复 5 次），
 
-          Time: 2-4 weeks
-          Cost: No monetary cost (authorship credit)
-          Expected improvement: 7.0 → 7.5-8.0
+    本轮通过调整图表尺寸来释放空间，间接解决布局问题。
 
-          ## Automated System Self-Assessment
+    '
+  id: M2
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: high
+  status: completed
+  title: Page 6 布局拥挤问题
+  type: FIGURE_CODE_REQUIRED
+- actions:
+  - agent: writer
+    expected_output: scripts/create_paper_figures.py 更新
+    status: pending
+    step: 1
+    task: "修改 scripts/create_paper_figures.py，调整以下函数：\n\n1. **fig1_overview()**: 保持当前实现（概念图不易缩小）\n\
+      \n2. **fig3_palu_distribution()**:\n   - 移除红色边框和 \"THEORETICAL ANALYSIS\" banner\n\
+      \   - 在 caption 中用 italic 文字说明 \"Theoretical analysis...\"\n\n3. **fig5_repair_tradeoff()**:\n\
+      \   - 调整 marker size 为更小的值\n   - 调整标签位置避免重叠（使用 xytext 和 textcoords）\n\n4. **所有图表的字体统一**:\n\
+      \   - xlabel/ylabel: fontsize=9\n   - tick labels: labelsize=8\n   - legend:\
+      \ fontsize=8\n\n注意：不要修改图表尺寸（width），因为尺寸在 LaTeX 中控制。\n只修改图表内部元素（字体、颜色、边框）。\n"
+  - agent: writer
+    depends_on:
+    - 1
+    expected_output: Latex/figures/ 中的 PDF 文件更新
+    status: pending
+    step: 2
+    task: '运行 Python 脚本重新生成所有图表：
 
-          This paper represents the CEILING of current automated research systems.
 
-          ✅ Successfully automated:
-          - Experimental design and execution
-          - Data analysis and insight extraction
-          - Literature search and citation retrieval
-          - Figure generation
-          - Technical writing
-          - Iterative refinement (55 rounds)
+      cd /home/xinj/GAC
 
-          ❌ Cannot reliably automate:
-          - Subjective aesthetic judgment
-          - Scholarly critical synthesis
-          - Non-deterministic optimization with visual feedback
-          - Holistic design requiring "taste"
+      python scripts/create_paper_figures.py
 
-          Honest Assessment:
-          The remaining gaps are NOT system failures—they are inherent limitations
-          of automating tasks requiring human perception, expertise, and craft.
 
-          ## Final Recommendation
+      验证输出：
 
-          RECOMMENDATION: SUBMIT AS-IS (Option A)
+      - Latex/figures/*.pdf 文件是否更新（检查时间戳）
 
-          Justification:
-          1. Score meets threshold (7.0/10 is "Weak Accept")
-          2. Technical merit is strong
-          3. Presentation issues are aesthetic, can be addressed in camera-ready
-          4. Cost-benefit: $1000-2200 for +0.5-0.8 has uncertain ROI
-          5. Time sensitivity: Submit now vs. miss cycle
+      - 图表样式是否符合预期（字体大小、无红色边框）
 
-          Do NOT:
-          - Continue automated iteration (55 rounds exhausted)
-          - Attempt structural reorganization (high risk, low reward)
-          - Add new experiments (Technical Quality 7.5 sufficient)
+      '
+  - agent: writer
+    depends_on:
+    - 2
+    expected_output: Latex/main.tex 更新（图表尺寸调整）
+    status: pending
+    step: 3
+    task: '修改 Latex/main.tex 中的图表尺寸：
 
-          ## Reproducibility & Next Steps
 
-          Code & Data:
-          - Experimental code: /home/xinj/GAC/scripts/
-          - Results: /home/xinj/GAC/results/
-          - Figures: /home/xinj/GAC/Latex/figures/
-          - LaTeX source: /home/xinj/GAC/Latex/main.tex
+      - Figure 1 (line ~129): 保持 0.7\columnwidth（概念图）
 
-          For Submission:
-          1. Verify figures render: cd Latex && pdflatex main.tex
-          2. Check page count: ≤ 6 pages (references unlimited)
-          3. Anonymize: Remove author names, update GitHub URL
-          4. Create arXiv version
-          5. Prepare supplementary material
+      - Figure 3 (line ~199): 从 0.6\columnwidth 改为 0.5\columnwidth
 
-          For Camera-Ready (If Accepted):
-          1. Address reviewer comments
-          2. Consider hiring LaTeX typesetter
-          3. Expand Related Work if requested
-          4. Add acknowledgments
+      - Figure 5 (line ~479): 从 0.55\columnwidth 改为 0.45\columnwidth
 
-          Conclusion:
-          This paper makes a solid technical contribution to MLSys community.
-          The automated system successfully took it from idea → experiments → paper → 7.0/10.
-          The remaining 0.5-1.0 points require human expertise in aesthetic/scholarly domains.
-          **Submit with confidence.**
 
-        status: "pending"
-        expected_output: "SUBMISSION_READY_REPORT.md with comprehensive analysis and recommendations"
+      同时修改 Figure 3 caption，移除红色边框相关描述，改为：
 
-      - step: 2
-        agent: "validator"
-        task: |
-          Create STOP signal file to halt automated iteration loop.
+      "Dimension distribution from unconstrained Fisher-information-based rank allocation
 
-          Write to: auto_research/state/STOP_ITERATION.flag
+      (Llama-3-8B, r=0.8). Theoretical analysis shows 96.9% of 512 KV head dimensions
 
-          Content:
-          ```
-          AUTOMATED ITERATION STOPPED
-          Reason: System capacity exhausted after 55 iterations
-          Final Score: 7.0/10 (Weak Accept threshold)
-          Decision: Human escalation required for remaining aesthetic issues
-          Report: See SUBMISSION_READY_REPORT.md for options
-          Timestamp: 2026-01-28T15:00:00Z
-          ```
+      would be misaligned."
 
-          This flag signals the orchestrator to stop the automated loop.
-        status: "pending"
-        depends_on: [1]
-        expected_output: "STOP_ITERATION.flag created"
+      '
+  - agent: writer
+    depends_on:
+    - 3
+    expected_output: main.pdf 更新，图表尺寸优化
+    status: pending
+    step: 4
+    task: '重新编译 LaTeX 并验证图表显示：
 
-    inner_loop_count: 0
-    max_inner_loops: 0
-    depends_on: []
 
-writing_tasks: []
+      cd Latex && pdflatex main.tex && pdflatex main.tex
 
-meta_notes: |
-  🛑 FINAL ACTION PLAN - HUMAN ESCALATION
 
-  This is NOT another iteration attempt. This plan acknowledges the automated
-  system has reached its capabilities ceiling after 55 iterations.
+      检查：
 
-  Current situation:
-  - Score: 7.0/10 (meets EuroMLSys "Weak Accept" threshold)
-  - Technical Quality: 7.5/10 (strong)
-  - Innovation: 7.0/10 (solid)
-  - Writing Quality: 8.0/10 (good)
-  - Paper Presentation: 6.0/10 (BOTTLENECK - aesthetic issues)
+      - Figure 3 和 5 是否变小了
 
-  Remaining issues are SUBJECTIVE and require HUMAN EXPERTISE:
-  - Professional LaTeX typography (non-deterministic, visual judgment)
-  - Graphic design polish (no objective metric)
-  - Scholarly critical literature synthesis (deep domain expertise)
+      - 图表内文字是否仍然清晰（9-10pt）
 
-  The automated system:
-  ✅ Successfully completed all experiments
-  ✅ Generated complete 6-page technical paper
-  ✅ Validated with dual E2E experiments
-  ✅ Reached acceptable score threshold
+      - Page 布局是否改善（释放了空间）
 
-  ❌ Cannot solve subjective aesthetic problems
-  ❌ Cannot perform scholarly critical synthesis
-  ❌ Cannot manually tune LaTeX float placement
+      '
+  depends_on: []
+  description: 'Figure 1, 3, 5 的信息量与空间占用严重不匹配：
 
-  This plan creates SUBMISSION_READY_REPORT.md and STOPS the loop.
+    - Figure 1: 4 个框占 0.7\columnwidth
 
-  The user should decide:
-  - Option A: Submit as-is (7.0/10, fast, no cost)
-  - Option B: Hire human experts ($1000-2200, 2-3 weeks, → 7.5-7.8)
-  - Option C: Find co-authors (no cost, 2-4 weeks, → 7.5-8.0)
+    - Figure 3: 10 个数据点占 0.6\columnwidth，红色边框过度强调
 
-  Orchestrator: After executing this plan, STOP the automated loop.
-  Do NOT trigger another iteration. Read STOP_ITERATION.flag and halt.
+    - Figure 5: 6 个数据点占 0.55\columnwidth，右上象限空白
+
+
+    需要修改 Python 绘图脚本并重新生成图表。
+
+    '
+  id: M3
+  inner_loop_count: 0
+  max_inner_loops: 2
+  priority: high
+  status: completed
+  title: Figure 信息密度失衡
+  type: FIGURE_CODE_REQUIRED
+- actions:
+  - agent: literature
+    expected_output: literature.yaml 更新，包含 H100 相关文献
+    status: pending
+    step: 1
+    task: '搜索 H100 架构相关文献：
+
+      1. NVIDIA Hopper architecture whitepaper (TMA, WGMMA)
+
+      2. FlashAttention-3 技术报告（为什么移除 96, 112 支持）
+
+      3. H100 Tensor Core 对齐要求文档
+
+      4. Hopper vs Ampere 性能对比论文
+
+
+      更新 literature.yaml，添加 H100 相关引用（3-5 篇）。
+
+      '
+  - agent: writer
+    depends_on:
+    - 1
+    expected_output: Latex/main.tex H100 段落扩展至 8-10 句话
+    status: pending
+    step: 2
+    task: "扩展 Latex/main.tex 的 H100 Generalization 段落 (lines 621-624)，\n从当前 3 句话增至\
+      \ 8-10 句话：\n\n内容要点：\n1. 当前 A100 focus 说明\n2. H100 架构相似性（4th-gen Tensor Cores,\
+      \ m16n8k16）\n3. H100 新特性可能改变对齐敏感度：\n   - TMA (Tensor Memory Accelerator) cache-line-aware\
+      \ 传输\n   - WGMMA 指令的 64×64 warpgroup tiles\n   - 不同的 SM count 和 memory hierarchy\n\
+      4. FlashAttention-3 优化 {64, 128, 256}，移除 96/112 的可能原因\n5. 结论：需要 H100 empirical\
+      \ validation，A100 发现可能需要架构特定调整\n\n引用 literature.yaml 中的 H100 文献。\n"
+  depends_on: []
+  description: 'H100 讨论仅 3 句话，纯推测无实验数据。
+
+    需要扩展讨论或明确 A100-only scope。
+
+    由于补充 H100 实验不现实（需要新硬件），选择扩展讨论段落。
+
+    '
+  id: M4
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: medium
+  status: completed
+  title: H100 Generalization 讨论过于简短
+  type: LITERATURE_REQUIRED
+- actions:
+  - agent: writer
+    expected_output: fig2_sdpa_latency.pdf 更新，字体增大，标签不重叠
+    status: pending
+    step: 1
+    task: "修改 scripts/create_paper_figures.py 中的 fig2_sdpa_latency() 函数：\n\n1. 增大字体：\n\
+      \   plt.xlabel('Head Dimension', fontsize=9)\n   plt.ylabel('Latency (ms)',\
+      \ fontsize=9)\n   plt.tick_params(axis='both', labelsize=8)\n\n2. 调整数据点标签位置，避免与\
+      \ marker 重叠：\n   使用 xytext=(offset_x, offset_y) 和 arrowprops\n\n然后运行：python\
+      \ scripts/create_paper_figures.py\n"
+  depends_on:
+  - M3
+  description: 'Figure 2 Y 轴标签约 7pt，X 轴约 8pt。
+
+    数据点标签 "2.19ms" 与橙色 marker 重叠。
+
+    '
+  id: m1
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: medium
+  status: completed
+  title: Figure 2 字体过小和数据点标签重叠
+  type: FIGURE_CODE_REQUIRED
+- actions:
+  - agent: writer
+    expected_output: fig4_root_cause.pdf 更新，绿色对比度改善
+    status: pending
+    step: 1
+    task: '修改 scripts/create_paper_figures.py 中的 fig4_root_cause() 函数：
+
+
+      将绿色从当前值改为深绿 ''#006400'' 或青色 ''#008B8B''。
+
+      或添加 hatching patterns 增强区分度：
+
+      hatches=[''///'', ''\\\\\\'', ''|||'', ''---'']
+
+
+      然后运行：python scripts/create_paper_figures.py
+
+      '
+  depends_on:
+  - M3
+  description: 'Figure 4 的绿色（SDPA BW 40%）对比度不足，打印时不明显。
+
+    '
+  id: m2
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: low
+  status: completed
+  title: Figure 4 颜色对比度不足
+  type: FIGURE_CODE_REQUIRED
+- actions:
+  - agent: writer
+    expected_output: Table 1 数值精度统一
+    status: pending
+    step: 1
+    task: '修改 Latex/main.tex Table 1 (lines 227-240)，
+
+      统一所有数值为 2 位小数：
+
+      - 26.0 → 26.00
+
+      - 26.5 → 26.50
+
+      - 27.0 → 27.00
+
+      - 27.1 → 27.10
+
+      - 28.1 → 28.10
+
+      '
+  depends_on: []
+  description: 'Table 1 部分数值 2 位小数（1.17ms），部分 1 位（26.0ms）。
+
+    这是 LaTeX 表格内容修改，不涉及 Python 代码。
+
+    '
+  id: m3
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: low
+  status: completed
+  title: Table 1 数值精度不一致
+  type: WRITING_ONLY
+- actions:
+  - agent: writer
+    expected_output: Abstract 精简至 10 行，保留 4 个关键数字
+    status: pending
+    step: 1
+    task: '修改 Latex/main.tex Abstract (lines 74-84)，精简数字：
+
+
+      保留的关键数字：
+
+      - 88% (SDPA latency increase)
+
+      - 96.9% (theoretical misalignment)
+
+      - --0.8% (negative validation)
+
+      - +86.9% (positive validation)
+
+
+      移除的数字：
+
+      - 58%, 50%, 40% (root causes) → 改为定性描述
+
+      - 22-28%, 3.7-7.2%, ROI 3.5-5.9× → 移到正文
+
+
+      目标：压缩至 10 行，保持信息完整性。
+
+      '
+  depends_on: []
+  description: 'Abstract 约 12 行，包含 10+ 具体数值，overwhelming。
+
+    需要压缩至 10 行，仅保留 3-4 key numbers。
+
+    '
+  id: m4
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: low
+  status: completed
+  title: Abstract 过长且数字过载
+  type: WRITING_ONLY
+- actions:
+  - agent: writer
+    expected_output: Limitations 改为独立子节，格式标准化
+    status: pending
+    step: 1
+    task: "修改 Latex/main.tex §6.6 Limitations (lines 519-530)：\n\n1. 改为独立子节（保持在 §6\
+      \ 内）：\n   \\subsection{Limitations}\n   \\label{sec:limitations}\n\n2. 移除 \\\
+      fbox，使用标准段落格式：\n   \\noindent\\textbf{L1. Applicability Scope:} ...\n\n   \\\
+      noindent\\textbf{L2. Downstream Tasks:} ...\n\n   \\noindent\\textbf{L3. Hardware:}\
+      \ ...\n\n3. 每个 limitation 扩展至 2-3 句话。\n"
+  depends_on: []
+  description: 'Limitations 使用 \fbox 格式，不够突出。
+
+    改为独立子节，扩展至 6-8 句话。
+
+    '
+  id: m5
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: low
+  status: completed
+  title: Limitations 格式改进
+  type: WRITING_ONLY
+- actions:
+  - agent: writer
+    expected_output: references.bib 格式统一
+    status: pending
+    step: 1
+    task: '修改 references.bib，统一格式：
+
+
+      1. arXiv 论文统一为 "arXiv:XXXX.XXXXX (YYYY)"
+
+      2. 会议论文添加 DOI（如果可用）
+
+      3. 移除冗余 GitHub URL（可在 footnote 中引用）
+
+
+      使用 BibTeX 标准字段，确保 ACM Reference Format 正确渲染。
+
+      '
+  depends_on: []
+  description: 'References 中 arXiv 论文格式不统一，部分缺少 DOI。
+
+    '
+  id: m6
+  inner_loop_count: 0
+  max_inner_loops: 1
+  priority: low
+  status: completed
+  title: References 格式统一
+  type: WRITING_ONLY
+planner_summary: '本轮 review 显示分数停滞在 7.0/10，主要瓶颈是 Paper Presentation (6.0/10)。
+
+  Memory 系统检测到所有 issues 已重复 5 次，并且上一轮修复无效（Issues still repeating: M1, M2, M3）。
+
+
+  **关键诊断**：
+
+  - Reviewer 明确指出瓶颈是视觉呈现问题（图表尺寸、布局拥挤）
+
+  - 之前尝试的 WRITING_ONLY 和 EXPERIMENT_REQUIRED 对 presentation 问题无效
+
+  - 根据策略升级规则（重复 5 次必须换方法），禁用 WRITING_ONLY
+
+
+  **本轮策略（强制变更）**：
+
+  1. **M1, M4**: LITERATURE_REQUIRED - 扩展 Related Work，增加 10-15 篇引用
+
+  2. **M2, M3, m1-m6**: FIGURE_CODE_REQUIRED - 修改 Python 绘图脚本，调整图表尺寸和样式
+
+
+  这是根本性策略转变：从修改 LaTeX 文字 → 修改 Python 代码生成更好的图表。
+
+  '
+review_iteration: 101
+writing_tasks:
+- changes_required:
+  - change: "1. 重新编译 LaTeX（两次以确保引用正确）：\n   cd Latex && pdflatex main.tex && bibtex\
+      \ main && pdflatex main.tex && pdflatex main.tex\n\n2. 验证关键改进：\n   - Page 6\
+      \ 布局是否改善（Related Work 间距 ≥ 5mm）\n   - Figure 3, 5 尺寸是否缩小\n   - Related Work\
+      \ 是否扩展至 1.0-1.2 页\n   - H100 讨论是否扩展至 8-10 句话\n   - 所有图表字体是否 ≥ 9pt\n\n3. 检查页数：正文应为\
+      \ 6 页（不含引用）\n\n4. 生成 PNG 预览（可选）：\n   python scripts/pdf_to_images.py\n"
+    section: 全文
+  description: 所有修改完成后，最终编译和验证
+  id: FINAL_COMPILATION
+  target_files:
+  - Latex/main.tex
+  - Latex/main.pdf
