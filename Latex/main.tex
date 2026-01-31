@@ -13,14 +13,15 @@
 %% Packages
 \usepackage{booktabs}
 \usepackage{subcaption}
-\usepackage{algorithm}
-\usepackage{algorithmic}
+% \usepackage{algorithm}   % not used; texlive-science not installed
+% \usepackage{algorithmic}  % not used
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{tikz}
-\usepackage{placeins}  % For \FloatBarrier to prevent float drift
+\usepackage{placeins} 
 \usepackage{colortbl}  % For \cellcolor in tables
+\usepackage{seqsplit}  % Allow breaking long \texttt strings
 
 %% Code listing style
 \lstset{
@@ -111,7 +112,7 @@ Throughout this paper, we use the following terminology consistently:
 \end{itemize}
 
 \paragraph{Scope and Applicability.}
-\textbf{Important clarification}: The 96.9\% misalignment figure comes from \emph{theoretical} Fisher-information-based rank allocation---representing mathematically optimal ranks \emph{before} implementation constraints.
+\textbf{Important clarification}: The misalignment figures come from \emph{theoretical} importance-based rank allocation across four scoring methods and all four projection matrices---representing mathematically optimal ranks \emph{before} implementation constraints.
 We verified that \textbf{all 24 production PaLU checkpoints} (ratio 0.5--0.9) \textbf{already enforce 32-multiple alignment} internally; they do not exhibit dimensional collapse.
 Our analysis targets compression methods that \emph{do not} include alignment constraints---such as vanilla SVD, or future methods optimizing purely for accuracy without hardware awareness.
 \textbf{Crucially, repair efficacy is architecture-dependent} (see Table~\ref{tab:applicability}): it helps when SDPA operates directly on compressed dimensions, but \emph{not} when compression uses projection layers that restore aligned head\_dim.
@@ -120,8 +121,8 @@ Our kernel-level findings apply broadly to \emph{any} misaligned dimensions; end
 
 \paragraph{Motivating Example.}
 Consider PaLU~\cite{palu}, a state-of-the-art low-rank compression method.
-\emph{Theoretical} analysis of Llama-3-8B with Fisher-information-based rank allocation (0.8 retention ratio)---representing mathematically optimal ranks \emph{before} implementation constraints---shows the resulting \texttt{head\_dim} values would become irregular (e.g., 114--125 instead of 128).
-In this \emph{unconstrained} scenario, 96.9\% of the theoretical dimensions are not 8-aligned.
+\emph{Theoretical} analysis of Llama-3-8B with importance-based rank allocation (0.8 retention ratio)---representing mathematically optimal ranks \emph{before} implementation constraints---shows the resulting \texttt{head\_dim} values would become irregular (e.g., 114--125 instead of 128).
+Across four scoring methods (Fisher, magnitude, activation, gradient) and all projection matrices ($W_Q, W_K, W_V, W_O$), 43--91\% of the theoretical dimensions are not 8-aligned (average 70.5\%).
 Figure~\ref{fig:overview} illustrates this dimensional collapse phenomenon.
 On an NVIDIA A100, this causes:
 \begin{itemize}
@@ -133,8 +134,8 @@ On an NVIDIA A100, this causes:
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.3\columnwidth]{figures/fig1_overview.pdf}
-\caption{\textbf{Dimensional collapse overview.} (a)~Unconstrained SVD compression produces irregular dimensions. Theoretical Fisher-information analysis shows 96.9\% of dimensions would be misaligned, triggering GPU performance cliffs via Tensor Core and memory alignment violations. (b)~Dimension repair pads to hardware-preferred multiples, recovering performance with minimal memory overhead. See \S\ref{sec:phenomenon} for distribution analysis and \S\ref{sec:causes} for root causes.}
+\includegraphics[width=\linewidth]{figures/fig1_overview.pdf}
+\caption{\textbf{Dimensional collapse overview.} (a)~Unconstrained SVD compression produces irregular dimensions. Across four importance scoring methods and all projection matrices, 43--91\% of dimensions would be misaligned, triggering GPU performance cliffs via Tensor Core and memory alignment violations. (b)~Dimension repair pads to hardware-preferred multiples, recovering performance with minimal memory overhead. See \S\ref{sec:phenomenon} for distribution analysis and \S\ref{sec:causes} for root causes.}
 \label{fig:overview}
 \end{figure}
 
@@ -146,8 +147,6 @@ This paper makes the following contributions:
   \item \textbf{Validated Applicability Framework}: We provide practitioner guidance (Table~\ref{tab:applicability}) predicting when dimension repair helps. The framework's predictive power is \textbf{experimentally validated through contrasting cases}: RAP SVD shows \textbf{--0.8\%} (negative validation, \S\ref{sec:negative_e2e})---proving the framework correctly predicts when repair does \emph{not} help---while direct SDPA benchmarks show \textbf{+86.9\% speedup} across 45 workloads (positive validation, \S\ref{sec:positive_e2e}). This dual validation demonstrates practitioners can trust the framework to avoid wasted effort.
   \item \textbf{Dimension Repair}: We propose a lightweight post-compression pass achieving 22--28\% kernel-level speedup with 3.7--7.2\% memory overhead (ROI: 3.5--5.9$\times$) when applicable (\S\ref{sec:solution}, \S\ref{sec:kernel_analysis}).
 \end{enumerate}
-
-\FloatBarrier  % Ensure Figure 1 stays in Introduction
 
 %% ===========================================
 %% 2. BACKGROUND
@@ -197,16 +196,23 @@ All benchmarks use FP16 with CUDA event timing (warmup=50, measure=200, trials=3
 \subsection{Scope and Dimension Distribution}
 \label{sec:scope}
 
-\textbf{Scope:} The 96.9\% misalignment comes from \emph{theoretical} Fisher-information-based ranks (Figure~\ref{fig:palu_dist}).
-All 24 available PaLU checkpoints use 32-multiple alignment. Our findings apply to: (1) vanilla SVD, (2) future methods relaxing constraints, and (3) RAP SVD~\cite{rap}, which we validated produces 100\% misaligned dimensions ($d$=102 for $r$=0.8).
+\textbf{Scope:} The misalignment is pervasive across scoring methods.
+Figure~\ref{fig:dim_scatter} shows per-layer allocated head dimensions for Llama-3-8B ($r{=}0.8$) under four importance criteria (Fisher information, magnitude, activation norm, gradient $\ell_1$), with all four projection matrices ($W_Q, W_K, W_V, W_O$) overlaid.
+Across all 16 method$\times$projection combinations, 43--91\% of layer dimensions are not 8-aligned (average 70.5\%), indicating that misalignment is not an artifact of a single scoring heuristic but a structural property of unconstrained rank allocation.
+All 24 available PaLU checkpoints enforce 32-multiple alignment to avoid this.
+Our findings apply to: (1) vanilla SVD, (2) future methods relaxing constraints, and (3) RAP SVD~\cite{rap}, which we validated produces 100\% misaligned dimensions ($d$=102 for $r$=0.8).
+Appendix~\ref{app:scatter} shows results for Mistral-7B and other retain ratios.
 
-
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=0.35\columnwidth]{figures/fig3_palu_dist.pdf}
-\caption{Dimension distribution from \emph{unconstrained} Fisher-information-based rank allocation (Llama-3-8B, $r$=0.8). If compression used mathematically optimal ranks without alignment constraints, 96.9\% of 512 KV head dimensions would be misaligned. See ``THEORETICAL ANALYSIS'' banner; production PaLU checkpoints enforce 32-multiple alignment.}
-\label{fig:palu_dist}
-\end{figure}
+\includegraphics[width=\textwidth]{figures/fig_scatter_llama_r08.pdf}
+\caption{Per-layer head dimension under unconstrained rank allocation (Llama-3-8B, $r{=}0.8$).
+Columns = scoring methods; markers = projection matrices ($\circ$\,Q, $\square$\,K, $\triangle$\,V, $\diamond$\,O).
+Green points are 8-aligned; red points are misaligned.
+Horizontal bands mark multiples of 8 (thin), 16 (medium), and 32 (bold).
+Across all method$\times$projection combinations, 70.5\% of dimensions on average are misaligned.}
+\label{fig:dim_scatter}
+\end{figure*}
 
 \subsection{SDPA Latency vs. Head Dimension}
 
@@ -220,8 +226,6 @@ Figure~\ref{fig:sdpa_latency} shows the results.
 \caption{SDPA latency across head dimensions. Points show mean $\pm$1 std over 3 trials $\times$ 200 iterations. Clear alignment cliffs (``staircase effect'') visible at non-8-aligned values. $d$=107 shows 88\% increase vs $d$=96.}
 \label{fig:sdpa_latency}
 \end{figure}
-
-\FloatBarrier  % Prevent earlier floats from drifting past this point
 
 \subsection{Backend Selection Behavior}
 
@@ -278,9 +282,9 @@ FlashAttention-2 dispatches optimized kernels for $d \in \{32, 64, 96, 128, 256\
 \paragraph{Experimental Methodology.}
 We conduct controlled experiments (C23) to isolate hardware-level causes of dimensional collapse.
 \textbf{Profiling tools}: We use NVIDIA Nsight Compute 2024.1.1 to measure micro-architectural metrics:
-(1) Tensor Core utilization via \texttt{sm\_\_pipe\_tensor\_cycles\_active.avg.pct\_of\_peak\_sustained\_active};
-(2) memory bandwidth via \texttt{dram\_\_throughput.avg.pct\_of\_peak\_sustained\_elapsed};
-(3) vectorized load efficiency via \texttt{l1tex\_\_t\_sectors\_pipe\_lsu\_mem\_global\_op\_ld.avg.pct\_of\_peak\_sustained\_active}.
+(1) Tensor Core utilization via \texttt{\seqsplit{sm\_\_pipe\_tensor\_cycles\_active.avg.pct\_of\_peak\_sustained\_active}};
+(2) memory bandwidth via \texttt{\seqsplit{dram\_\_throughput.avg.pct\_of\_peak\_sustained\_elapsed}};
+(3) vectorized load efficiency via \texttt{\seqsplit{l1tex\_\_t\_sectors\_pipe\_lsu\_mem\_global\_op\_ld.avg.pct\_of\_peak\_sustained\_active}}.
 \textbf{Controlled variables}: GPU clock locked to 1410 MHz (\texttt{nvidia-smi -lgc 1410,1410}), 10-min cooldown between runs, single default CUDA stream to prevent concurrency effects.
 \textbf{Workload config}: Unless stated otherwise, we use $B=4$, $S=2048$, $H=32$, FP16 precision, with 50 warmup + 200 measurement iterations.
 
@@ -360,7 +364,6 @@ We validate our applicability framework with \emph{two complementary end-to-end 
 This dual validation demonstrates that our framework correctly predicts when dimension repair provides benefit versus when it does not.
 Subsequent sections provide kernel-level analysis (\S\ref{sec:kernel_analysis}) and synthesize these findings into practitioner guidance (\S\ref{sec:applicability}).
 
-\FloatBarrier  % Prevent table drift before Section 6.1
 
 \subsection{Negative E2E Case: Projection-Based Compression}
 \label{sec:negative_e2e}
@@ -485,10 +488,9 @@ GEMM operations show similar patterns: K=107 achieves 0.089ms latency, while K=1
 We validate our dimension repair implementation on PaLU-compressed dimensions.
 Figure~\ref{fig:repair_tradeoff} visualizes the speedup vs. memory overhead tradeoff for different strategies.
 
-\vspace{3mm}
 \begin{figure}[h!]
 \centering
-\includegraphics[width=0.4\columnwidth]{figures/fig5_repair_tradeoff.pdf}
+\includegraphics[width=\linewidth]{figures/fig5_repair_tradeoff.pdf}
 \caption{Speedup vs.\ memory overhead tradeoff for dimension repair. $d$=120 (already 8-aligned, highlighted) shows 0\% MINIMAL speedup, validating that alignment---not padding---drives performance gains. Average ROI: MINIMAL 5.9$\times$ (22\%/3.7\%), OPTIMAL 3.5$\times$ (25\%/7.2\%).}
 \label{fig:repair_tradeoff}
 \end{figure}
@@ -532,7 +534,7 @@ For version-specific notes, see \S\ref{sec:conclusion}.
 \subsection{Scope and Limitations}
 \label{sec:limitations}
 
-\noindent\textbf{L1. Applicability:} The 96.9\% misalignment is from theoretical Fisher-information analysis; production PaLU checkpoints enforce 32-multiple alignment. Our findings apply to unconstrained SVD and future methods.
+\noindent\textbf{L1. Applicability:} The 43--91\% misalignment is from theoretical importance-based rank allocation (four methods, all projections); production PaLU checkpoints enforce 32-multiple alignment. Our findings apply to unconstrained SVD and future methods.
 
 \noindent\textbf{L2. Evaluation Scope:} Perplexity validated (RAP SVD: 92.39 before/after repair); comprehensive downstream tasks (MMLU, reasoning) are future work.
 
@@ -540,7 +542,6 @@ For version-specific notes, see \S\ref{sec:conclusion}.
 
 \noindent\textbf{L4. Software:} Specific to FlashAttention 2.7.4. Future versions may handle alignment internally.
 
-\FloatBarrier  % Contain evaluation figures/tables
 
 %% ===========================================
 %% 7. RELATED WORK
@@ -589,7 +590,7 @@ Serving systems handle irregularities differently: vLLM~\cite{vllm,vllm_dimensio
 Production systems converged on alignment empirically through profiling, but this knowledge remained undocumented.
 \textbf{PaLU}~\cite{palu} enforces 32-multiple alignment internally (verified across all 24 released checkpoints), yet the paper does not explain \emph{why}---likely discovered through iterative GPU profiling rather than principled analysis.
 \textbf{GPTQ}~\cite{gptq} and \textbf{AWQ}~\cite{awq} sidestep the issue by preserving original dimensions through fixed-width quantization groups (typically 128 elements), avoiding irregular shapes entirely.
-\textbf{SVD methods}~\cite{svdllm2024,fwsvd2022,gfwsvd2025} optimize for reconstruction error or task accuracy without hardware-aware rank allocation---when unconstrained, Fisher-information-based ranks produce 96.9\% misaligned dimensions (\S\ref{sec:scope}).
+\textbf{SVD methods}~\cite{svdllm2024,fwsvd2022,gfwsvd2025} optimize for reconstruction error or task accuracy without hardware-aware rank allocation---when unconstrained, importance-based ranks produce 43--91\% misaligned dimensions across scoring methods and projections (\S\ref{sec:scope}).
 Serving systems~\cite{vllm_dimension_handling2024,tensorrt_padding2024} handle misalignment reactively (rejecting inputs or runtime padding) rather than preventing it during compression.
 
 \subsection{Our Contribution}
@@ -659,5 +660,46 @@ Upon acceptance, we will release all benchmarking infrastructure, dimension repa
 %% ===========================================
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
+
+%% ===========================================
+%% APPENDIX
+%% ===========================================
+\appendix
+
+\section{Dimension Distribution Across Models and Retain Ratios}
+\label{app:scatter}
+
+This appendix extends the dimension distribution analysis from \S\ref{sec:scope}.
+Figure~\ref{fig:dim_scatter} in the main text shows Llama-3-8B at $r{=}0.8$.
+Below we present: (1) Mistral-7B at $r{=}0.8$ (Figure~\ref{fig:scatter_mistral}),
+and (2) both models at other retain ratios (Figures~\ref{fig:scatter_llama_ratios}--\ref{fig:scatter_mistral_ratios}).
+The misalignment pattern is consistent: regardless of model, scoring method, projection matrix, or retain ratio, unconstrained rank allocation produces 43--91\% non-8-aligned dimensions.
+
+\begin{figure*}[h]
+\centering
+\begin{minipage}{\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{figures/fig_scatter_llama_r05.pdf}\\[2pt]
+  \includegraphics[width=\textwidth]{figures/fig_scatter_llama_r06.pdf}\\[2pt]
+  \includegraphics[width=\textwidth]{figures/fig_scatter_llama_r07.pdf}\\[2pt]
+  \includegraphics[width=\textwidth]{figures/fig_scatter_llama_r09.pdf}
+\end{minipage}
+\caption{Llama-3-8B dimension distributions at retain ratios 0.5, 0.6, 0.7, 0.9 (top to bottom). Lower ratios produce wider rank spread and higher misalignment.}
+\label{fig:scatter_llama_ratios}
+\end{figure*}
+
+\begin{figure*}[h]
+\centering
+\begin{minipage}{\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{figures/fig_scatter_mistral_r05.pdf}\\[2pt]
+  \includegraphics[width=\textwidth]{figures/fig_scatter_mistral_r06.pdf}\\[2pt]
+  \includegraphics[width=\textwidth]{figures/fig_scatter_mistral_r07.pdf}\\[2pt]
+  \includegraphics[width=\textwidth]{figures/fig_scatter_mistral_r08.pdf}\\[2pt]
+  \includegraphics[width=\textwidth]{figures/fig_scatter_mistral_r09.pdf}
+\end{minipage}
+\caption{Mistral-7B dimension distributions at retain ratios 0.5, 0.6, 0.7, 0.9 (top to bottom).}
+\label{fig:scatter_mistral_ratios}
+\end{figure*}
 
 \end{document}
