@@ -1,10 +1,19 @@
-# results & logs
-results/
-slurm_logs/
+*.pt
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.ipynb
+.cache/
+submodules/G-Compress/*
+slurm_logs/
+pdfs/
+
+# Ignore all .bin files, but allow exceptions for LoRA adapters
+*.bin
+outputs/
+!outputs/LoRA/*.pt/
+!outputs/LoRA/**/*.bin
+
+# results
+results/
 
 # local envs
 .venv/
@@ -12,6 +21,9 @@ venv/
 
 # temp
 *.tmp
+*.pyc
+*.pyo
+*.pyd
 .DS_Store
 texput.log
 
