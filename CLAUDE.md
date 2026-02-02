@@ -119,3 +119,11 @@ nohup python auto_research/orchestrator.py --max-days 3 > auto_research/logs/orc
 
 参考模板：`slurm/run_bench.sbatch`
 日志目录：`slurm_logs/`
+
+## LaTeX 编译规则
+
+- **编译输出目录**：编译 LaTeX 时必须使用 `-output-directory=.out`，避免在源码目录生成 `.aux`、`.log` 等临时文件。例如：
+  ```bash
+  cd Latex && mkdir -p .out && pdflatex -output-directory=.out -interaction=nonstopmode main.tex
+  ```
+- **References 前必须加 `\clearpage`**：Conclusion 和 References 之间始终保留 `\clearpage`，不要删除

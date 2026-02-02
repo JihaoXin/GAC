@@ -595,7 +595,7 @@ COLORS = {
 2. 修改代码解决问题
 3. 重新生成：
    ```bash
-   source ~/.bashrc && mamba activate gc && python scripts/create_paper_figures.py
+   source ~/.bashrc && mamba activate gac && python scripts/create_paper_figures.py
    ```
 4. 检查生成的 PNG 预览确认修复效果
 5. 确保同时生成 PDF 版本用于 LaTeX

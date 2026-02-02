@@ -77,7 +77,7 @@ COLORS = {
 3. 修改代码修复问题
 4. 运行脚本重新生成图表：
    ```bash
-   source ~/.bashrc && mamba activate gc && python scripts/create_paper_figures.py
+   source ~/.bashrc && mamba activate gac && python scripts/create_paper_figures.py
    ```
 5. 检查生成的图表（读取 PNG 文件预览）
 6. 确认修复完成

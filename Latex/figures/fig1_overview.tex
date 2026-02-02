@@ -1,0 +1,99 @@
+% fig1_overview.tex — Dimensional Collapse Overview (TikZ)
+% Usage: \input{figures/fig1_overview.tex}
+\begin{figure*}[t]
+\centering
+\begin{tikzpicture}[scale=0.82, every node/.style={scale=0.82},
+    >=stealth,
+    node distance=1.2cm,
+    box/.style={
+      draw, rounded corners=4pt, minimum width=2.1cm, minimum height=2.4cm,
+      line width=0.8pt, text=white, font=\sffamily, align=center
+    },
+    metric/.style={
+      draw, rounded corners=4pt, minimum width=1.9cm, minimum height=2.4cm,
+      line width=1.2pt, align=center, font=\sffamily
+    },
+    lbl/.style={font=\sffamily\small, align=center},
+    note/.style={font=\sffamily\small\itshape, fill=gray!8, draw=gray!50,
+                 rounded corners=2pt, inner sep=4pt}
+  ]
+
+  % ===== (a) Left panel: Dimensional Collapse Problem =====
+  \begin{scope}[local bounding box=panelA]
+    % Original model
+    \node[box, fill={rgb,255:red,55;green,131;blue,187}] (orig) {
+      \textbf{\normalsize Original}\\[3pt]
+      head\_dim\\[2pt]
+      {\Large\bfseries\ttfamily = 128}
+    };
+
+    % Arrow: SVD compress
+    \node[box, fill={rgb,255:red,211;green,63;blue,73}, right=1.4cm of orig] (comp) {
+      \textbf{\normalsize Compressed}\\[3pt]
+      head\_dim\\[2pt]
+      {\Large\bfseries\ttfamily = 107}
+    };
+    \draw[->, line width=1.8pt] (orig.east) -- (comp.west)
+      node[midway, above=6pt, lbl] {\textbf{SVD}}
+      node[midway, below=4pt, lbl] {Compress};
+
+    % Impact metric
+    \node[metric, fill=red!5, draw={rgb,255:red,211;green,63;blue,73},
+          right=0.9cm of comp] (impact) {
+      {\color{red!70!black}\fontsize{18}{20}\selectfont\bfseries +88\%}\\[3pt]
+      {\small\bfseries Latency}\\[-1pt]
+      {\small Increase}
+    };
+
+    % Bottom note
+    \node[note, below=0.5cm of comp]
+      {{\ttfamily 107\,\%\,8 $\neq$ 0} ~$\to$~ GPU alignment violation};
+  \end{scope}
+
+  % Panel (a) title
+  \node[above=0.2cm of panelA.north, font=\sffamily\bfseries] {(a) Dimensional Collapse Problem};
+
+  % ===== (b) Right panel: Dimension Repair Solution =====
+  \begin{scope}[xshift=9.6cm, local bounding box=panelB]
+    % Misaligned input
+    \node[box, fill={rgb,255:red,211;green,63;blue,73}] (mis) {
+      {\Large\bfseries d=107}\\[3pt]
+      (misaligned)\\[2pt]
+      {\small 2.15\,ms}
+    };
+
+    % Repaired output
+    \node[box, fill={rgb,255:red,56;green,158;blue,92}, right=1.4cm of mis] (rep) {
+      {\Large\bfseries d=112}\\[3pt]
+      (8-aligned)\\[2pt]
+      {\small 1.49\,ms}
+    };
+    \draw[->, line width=1.8pt, color={rgb,255:red,56;green,158;blue,92}]
+      (mis.east) -- (rep.west)
+      node[midway, above=6pt, lbl, text={rgb,255:red,56;green,158;blue,92}] {\textbf{Zero-Pad}}
+      node[midway, below=4pt, lbl, text={rgb,255:red,56;green,158;blue,92}] {$\to$ \textbf{112}};
+
+    % Result metric
+    \node[metric, fill=green!5, draw={rgb,255:red,56;green,158;blue,92},
+          right=0.9cm of rep] (result) {
+      {\color{green!50!black}\fontsize{18}{20}\selectfont\bfseries +30\%}\\[3pt]
+      {\small\bfseries Speedup}\\[2pt]
+      {\footnotesize\color{gray} Mem: +4.7\%}
+    };
+
+    % Bottom note
+    \node[note, below=0.5cm of rep]
+      {Bit-exact output preservation};
+  \end{scope}
+
+  % Panel (b) title
+  \node[above=0.2cm of panelB.north, font=\sffamily\bfseries] {(b) Dimension Repair Solution};
+
+  % Dashed separator between panels
+  \draw[dashed, gray!50, line width=0.5pt]
+    ([xshift=4.65cm]panelA.north) -- ([xshift=4.65cm]panelA.south);
+
+\end{tikzpicture}
+\caption{\textbf{Dimensional collapse overview.} (a)~Unconstrained SVD compression produces irregular dimensions. Across four importance scoring methods and all projection matrices, 43--91\% of dimensions would be misaligned, triggering GPU performance cliffs via Tensor Core and memory alignment violations. (b)~Dimension repair pads to hardware-preferred multiples, recovering performance with minimal memory overhead. See \S\ref{sec:distribution} for distribution analysis and \S\ref{sec:root_cause} for root causes.}
+\label{fig:overview}
+\end{figure*}

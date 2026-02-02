@@ -788,7 +788,7 @@ AutoGAC Status:
 
             self.log(f"  运行: {cmd}", "FIGURES")
             result = subprocess.run(
-                ["bash", "-c", f"source ~/.bashrc && mamba activate gc && {cmd}"],
+                ["bash", "-c", f"source ~/.bashrc && mamba activate gac && {cmd}"],
                 capture_output=True, text=True, timeout=300, cwd=PROJECT_DIR
             )
 
@@ -818,7 +818,7 @@ AutoGAC Status:
             FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
             result = subprocess.run(
-                ["bash", "-c", "source ~/.bashrc && mamba activate gc && python scripts/create_paper_figures.py"],
+                ["bash", "-c", "source ~/.bashrc && mamba activate gac && python scripts/create_paper_figures.py"],
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -889,7 +889,7 @@ AutoGAC Status:
         self.log("Converting PDF to images for visual review...", "INFO")
         try:
             result = subprocess.run(
-                ["bash", "-c", "source ~/.bashrc && mamba activate gc && python scripts/pdf_to_images.py Latex/main.pdf --dpi 150"],
+                ["bash", "-c", "source ~/.bashrc && mamba activate gac && python scripts/pdf_to_images.py Latex/main.pdf --dpi 150"],
                 capture_output=True,
                 text=True,
                 timeout=120,

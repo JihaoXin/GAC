@@ -14,7 +14,7 @@
 set -e
 
 source ~/.bashrc
-conda activate gc
+conda activate gac
 cd $SLURM_SUBMIT_DIR
 
 export PYTHONPATH="$SLURM_SUBMIT_DIR:$SLURM_SUBMIT_DIR/src:$SLURM_SUBMIT_DIR/third_party/palu:$PYTHONPATH"

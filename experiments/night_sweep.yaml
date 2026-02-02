@@ -13,6 +13,20 @@ experiments:
     measure: 200
     trials: 3
 
+  S1_sdpa_extended:
+    type: sdpa_dense
+    dtype: fp16
+    shapes:
+      - {batch: 4, seq_len: 2048, n_heads: 32}
+    head_dim_range: [129, 256]
+    head_dim_boundary: 160  # step1 up to 160, step2 above
+    head_dim_step_1: 1  # step for 129..160
+    head_dim_step_2: 2  # step for 162..256
+    backend: AUTO
+    warmup: 50
+    measure: 200
+    trials: 3
+
   S2_sdpa_backend_forced:
     type: sdpa_backend_forced
     dtype: fp16

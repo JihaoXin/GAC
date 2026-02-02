@@ -41,7 +41,7 @@ GAC 研究 LLM 压缩后维度不对齐导致的推理性能下降问题。
 
 set -e
 source ~/.bashrc
-mamba activate gc
+mamba activate gac
 cd $SLURM_SUBMIT_DIR
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True

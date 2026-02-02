@@ -63,8 +63,11 @@ def run_s1_sdpa_dense_sweep(exp_spec: Dict, device: str = "cuda:0", seed: int = 
     trials = exp_spec.get("trials", 3)
     
     # Generate head_dim list
-    head_dims = list(range(hd_min, 129, step1))  # 64..128 step 1
-    head_dims.extend(range(130, hd_max + 1, step2))  # 130..160 step 2
+    # step1 applies up to the boundary (default 128), step2 applies above
+    boundary = exp_spec.get("head_dim_boundary", 128)
+    head_dims = list(range(hd_min, min(boundary + 1, hd_max + 1), step1))
+    if hd_max > boundary:
+        head_dims.extend(range(boundary + step2, hd_max + 1, step2))
     
     results = {
         "experiment": "S1_sdpa_dense_sweep",

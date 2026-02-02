@@ -13,7 +13,7 @@
 
 set -e
 source ~/.bashrc
-mamba activate gc
+mamba activate gac
 cd $SLURM_SUBMIT_DIR
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True

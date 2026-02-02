@@ -15,7 +15,7 @@ set -e  # Exit on error
 
 # Activate mamba environment
 source ~/.bashrc
-mamba activate gc
+mamba activate gac
 cd $SLURM_SUBMIT_DIR
 
 # Set CUDA memory allocation settings

@@ -18,7 +18,7 @@
 set -e
 
 source ~/.bashrc
-mamba activate gc
+mamba activate gac
 cd $SLURM_SUBMIT_DIR
 
 # Set up Python path
