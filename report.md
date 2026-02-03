@@ -1,7 +1,7 @@
-# When Smaller Is Slower: Dimensional Collapse in LLM Compressions
+# When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
 
 <small>
-Suggested alternatives: **ShapeGuard: Preventing Dimensional Collapse in LLM Compressions**; **GAC: GPU‑Aligned Compression for Fast LLM Inference**.
+Suggested alternatives: **ShapeGuard: Preventing Dimensional Collapse in Compressed LLMs**; **GAC: GPU‑Aligned Compression for Fast LLM Inference**.
 </small>
 
 ## Motivation

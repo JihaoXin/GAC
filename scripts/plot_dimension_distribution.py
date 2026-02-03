@@ -186,6 +186,102 @@ def plot_scatter_single_model(data: dict, retain_ratio: float, out_dir: Path, pr
     print(f"  Saved: {out_path}  +  {pdf_path.name}")
 
 
+def plot_scatter_2x2(data: dict, retain_ratio: float, out_dir: Path, projections: list[str]):
+    """
+    2×2 scatter plot for slides — one subplot per scoring method.
+    Only shows K and V projections (the ones actually compressed).
+    """
+    model_name = data["model"]
+    model_tag = model_name.lower().replace("-", "_").replace(".", "_")
+    head_dim = data["head_dim"]
+
+    fig, axes = plt.subplots(2, 2, figsize=(5.5, 4.0), sharey=True, sharex=True)
+    fig.subplots_adjust(wspace=0.08, hspace=0.35)
+
+    # Compute global y range
+    global_min, global_max = float("inf"), float("-inf")
+    all_proj_ranks = {}
+    for method in METHODS:
+        proj_ranks = {}
+        for proj in projections:
+            scores = get_scores(data, method, proj)
+            if scores is None:
+                continue
+            ranks = allocate_ranks(scores, head_dim, retain_ratio)
+            proj_ranks[proj] = ranks
+            arr = np.array(ranks)
+            global_min = min(global_min, arr.min())
+            global_max = max(global_max, arr.max())
+        all_proj_ranks[method] = proj_ranks
+
+    ymin = max(global_min - 5, 0)
+    ymax = global_max + 5
+
+    for idx, method in enumerate(METHODS):
+        row, col = idx // 2, idx % 2
+        ax = axes[row, col]
+        proj_ranks = all_proj_ranks[method]
+
+        if not proj_ranks:
+            ax.text(0.5, 0.5, "N/A", ha="center", va="center", transform=ax.transAxes)
+            continue
+
+        # Alignment bands
+        for mult in range(int(ymin // 8), int(ymax // 8) + 2):
+            center = mult * 8
+            ax.axhline(center, color="#2ecc71", alpha=0.2, linewidth=0.4, zorder=0)
+        for mult in range(int(ymin // 32), int(ymax // 32) + 2):
+            center = mult * 32
+            ax.axhline(center, color="#1a6b30", alpha=0.6, linewidth=0.8, zorder=1)
+
+        # Plot each projection
+        all_dims = []
+        for proj, ranks in proj_ranks.items():
+            layers = np.arange(len(ranks)) + PROJ_OFFSETS.get(proj, 0)
+            dims = np.array(ranks)
+            marker = PROJ_MARKERS.get(proj, "o")
+            colors = ["#27AE60" if d % 8 == 0 else "#E74C3C" for d in dims]
+            ax.scatter(layers, dims, c=colors, s=14, marker=marker,
+                       edgecolors="black", linewidths=0.3, zorder=5, alpha=0.8)
+            all_dims.extend(ranks)
+
+        stats = compute_alignment_stats(all_dims)
+        ax.set_title(f"{METHOD_LABELS[method]}  ({stats['misaligned_pct']:.0f}% misaligned)",
+                     fontsize=9, fontweight='bold', pad=4)
+
+        if col == 0:
+            ax.set_ylabel("Head Dim", fontsize=9)
+        if row == 1:
+            ax.set_xlabel("Layer", fontsize=9)
+
+        ax.tick_params(axis="both", labelsize=8)
+        ax.set_xlim(-1, len(list(proj_ranks.values())[0]))
+        ax.set_ylim(ymin, ymax)
+        ax.set_yticks([32, 64, 96, 128])
+
+    # Legend for projection markers
+    from matplotlib.lines import Line2D
+    legend_items = []
+    for proj in projections:
+        legend_items.append(Line2D([0], [0], marker=PROJ_MARKERS[proj], color='w',
+                           markerfacecolor='gray', markersize=5, markeredgecolor='black',
+                           markeredgewidth=0.3, label=PROJ_LABELS[proj]))
+    legend_items.append(Line2D([0], [0], marker='o', color='w',
+                       markerfacecolor='#27AE60', markersize=5, label='8-aligned'))
+    legend_items.append(Line2D([0], [0], marker='o', color='w',
+                       markerfacecolor='#E74C3C', markersize=5, label='Misaligned'))
+    fig.legend(handles=legend_items, loc='lower center', ncol=len(legend_items),
+               fontsize=8, frameon=False, bbox_to_anchor=(0.5, -0.02))
+
+    plt.tight_layout(rect=[0, 0.04, 1, 1])
+    out_path = out_dir / f"scatter_2x2_{model_tag}_r{retain_ratio}.pdf"
+    fig.savefig(out_path, bbox_inches="tight")
+    png_path = out_path.with_suffix(".png")
+    fig.savefig(png_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved: {out_path}  +  {png_path.name}")
+
+
 def plot_grid(all_data: list[dict], retain_ratio: float, out_dir: Path, proj: str):
     """Bar chart of head dimension counts for a specific projection."""
     n_models = len(all_data)

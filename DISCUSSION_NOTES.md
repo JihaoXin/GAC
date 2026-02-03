@@ -1,6 +1,6 @@
 # 论文修改讨论记录
 **日期**: 2026-01-31
-**论文**: When Smaller Is Slower: Dimensional Collapse in LLM Compressions
+**论文**: When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
 
 ---
 

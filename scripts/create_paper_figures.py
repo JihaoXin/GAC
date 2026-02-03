@@ -299,67 +299,56 @@ def fig2_sdpa_latency():
 
 
 def fig3_palu_distribution():
-    """Figure 3: PaLU Dimension Distribution - Histogram.
+    """Figure 3: PaLU Per-Layer KV Head Dimension.
 
-    REVIEWER FIX M3 (density): Removed excessive decorations, simplified to core data.
-    Information will be moved to caption instead of cluttering the figure.
-
-    REVIEWER FIX M2: Reduced from 3.3x2.3 to 3.0x2.0 to fix Page 6 crowding.
-    This is a simple 10-bin histogram with very low information density.
+    Stem plot: one dot per layer, colored by 8-alignment.
+    Horizontal bands at 8-aligned values for reference.
     """
-    # Load PaLU dimension data
     with open('results/palu_dim_dist/llama3_r0.8/dims.json') as f:
         data = json.load(f)
 
-    dims = data['dims_per_head_all_kv']
+    dims = data['dims_per_head']  # 32 layers
+    layers = list(range(len(dims)))
 
-    # REVIEWER M2: Even smaller to match low information density (single 10-bin histogram)
-    fig, ax = plt.subplots(figsize=(3.0, 2.0))
+    fig, ax = plt.subplots(figsize=(3.4, 2.2))
 
-    # Count dimensions
-    counter = Counter(dims)
-    unique_dims = sorted(counter.keys())
-    counts = [counter[d] for d in unique_dims]
+    # Horizontal reference bands at 8-aligned values
+    for val in [56, 64, 72, 80, 88, 96, 104, 112, 120, 128]:
+        if min(dims) - 10 <= val <= max(dims) + 10:
+            ax.axhline(val, color=COLORS['aligned'], alpha=0.15, linewidth=6, zorder=0)
 
-    # Color based on alignment
-    colors = [COLORS['aligned'] if d % 8 == 0 else COLORS['misaligned'] for d in unique_dims]
+    # Draw stems and markers manually for per-color control
+    colors = [COLORS['aligned'] if d % 8 == 0 else COLORS['misaligned'] for d in dims]
+    for x, y, c in zip(layers, dims, colors):
+        ax.vlines(x, min(dims) - 8, y, color=c, linewidth=1.5, alpha=0.3, zorder=1)
+        ax.plot(x, y, 'o', color=c, markersize=5, markeredgecolor='white',
+                markeredgewidth=0.3, zorder=5)
 
-    bars = ax.bar(unique_dims, counts, color=colors, edgecolor='black', linewidth=0.5, width=0.8)
-
-    # Add percentage labels on top of bars - only for significant bars
-    for d, count in zip(unique_dims, counts):
-        pct = count / len(dims) * 100
-        if pct > 5:
-            ax.text(d, count + 5, f'{pct:.0f}%', ha='center', va='bottom', fontsize=9)
-
-    ax.set_xlabel('Per-Head Dimension', fontsize=10)
-    ax.set_ylabel('Count', fontsize=10)
-    ax.set_xlim(112, 127)
+    ax.set_xlabel('Layer', fontsize=10)
+    ax.set_ylabel('Per-Head Dim', fontsize=10)
+    ax.set_xlim(-1, len(dims))
+    ax.set_ylim(min(dims) - 8, max(dims) + 8)
     ax.tick_params(labelsize=9)
 
-    # Calculate alignment stats
-    aligned_count = sum(1 for d in dims if d % 8 == 0)
-    aligned_pct = aligned_count / len(dims) * 100
-    misaligned_pct = 100 - aligned_pct
-
-    # REVIEWER M3: Simplified annotation - just the key stats, no visual clutter
-    ax.text(0.97, 0.97, f'Llama-3-8B (r=0.8)\n'
-                        f'512 KV heads\n'
-                        f'96.9% misaligned',
-           transform=ax.transAxes, fontsize=9, verticalalignment='top', horizontalalignment='right',
-           bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='gray', alpha=0.95))
-
-    # Legend - simple and clean
+    # Legend
     legend_elements = [
-        mpatches.Patch(facecolor=COLORS['aligned'], edgecolor='black', label='8-aligned'),
-        mpatches.Patch(facecolor=COLORS['misaligned'], edgecolor='black', label='Misaligned'),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor=COLORS['aligned'],
+               markersize=6, label='8-aligned'),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor=COLORS['misaligned'],
+               markersize=6, label='Misaligned'),
     ]
-    ax.legend(handles=legend_elements, loc='upper left', framealpha=0.95, fontsize=9)
+    ax.legend(handles=legend_elements, loc='upper right', fontsize=8,
+              framealpha=0.9, edgecolor='none')
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.grid(axis='y', alpha=0.15, linewidth=0.5)
+    ax.grid(axis='x', visible=False)
 
     plt.tight_layout()
     fig.savefig(OUTPUT_DIR / 'fig3_palu_dist.pdf')
     fig.savefig(OUTPUT_DIR / 'fig3_palu_dist.png')
-    print(f"Saved: fig3_palu_dist.pdf (SIMPLIFIED - reviewer M3: reduced clutter)")
+    print(f"Saved: fig3_palu_dist.pdf")
     plt.close()
 
 
@@ -371,21 +360,21 @@ def fig4_root_cause():
     """
     fig, ax = plt.subplots(figsize=(2.3, 1.8))
 
-    causes = ['TC', 'VecLoad', 'SDPA', 'L2']
-    impacts = [58.0, 50.0, 40.0, 5.8]
-    errors = [4.2, 5.5, 4.8, 1.2]
-    status = ['Confirmed', 'Confirmed', 'Confirmed', 'Not Confirmed']
+    causes = ['TC', 'LDG', 'L2']
+    impacts = [58.0, 50.0, 5.8]
+    errors = [4.2, 5.5, 1.2]
+    status = ['Confirmed', 'Confirmed', 'Minor']
 
     color_confirmed = '#0173B2'
-    color_not_confirmed = '#DE8F05'
-    colors = [color_confirmed if s == 'Confirmed' else color_not_confirmed for s in status]
+    color_minor = '#DE8F05'
+    colors = [color_confirmed if s == 'Confirmed' else color_minor for s in status]
 
     y_pos = np.arange(len(causes))
     bars = ax.barh(y_pos, impacts, color=colors, edgecolor='black', linewidth=0.5, height=0.55,
                    xerr=errors, capsize=2, error_kw={'linewidth': 0.7, 'capthick': 0.7})
 
     for i, s in enumerate(status):
-        if s == 'Not Confirmed':
+        if s == 'Minor':
             bars[i].set_hatch('///')
 
     ax.set_yticks(y_pos)
@@ -405,7 +394,7 @@ def fig4_root_cause():
 
     legend_elements = [
         mpatches.Patch(facecolor=color_confirmed, edgecolor='black', label='Confirmed'),
-        mpatches.Patch(facecolor=color_not_confirmed, edgecolor='black', hatch='///', label='Not Confirmed'),
+        mpatches.Patch(facecolor=color_minor, edgecolor='black', hatch='///', label='Minor'),
     ]
     ax.legend(handles=legend_elements, loc='lower right', framealpha=0.9, fontsize=5,
               borderpad=0.3, handlelength=1.0)

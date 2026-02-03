@@ -56,7 +56,7 @@ class SimpleMemory:
 每次给 Agent 上下文时，始终包含原始目标：
 
 ```
-论文标题: When Smaller Is Slower: Dimensional Collapse in LLM Compressions
+论文标题: When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
 目标会议: EuroMLSys 2026 (SIGPLAN format, 正文 6 pages, 引用和附录不限)
 
 核心贡献（不可偏离）:

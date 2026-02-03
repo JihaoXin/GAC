@@ -1,6 +1,6 @@
 # GAC: GPU-Aligned Compression
 
-**When Smaller Is Slower: Dimensional Collapse in LLM Compressions**
+**When Smaller Is Slower: Dimensional Collapse in Compressed LLMs**
 
 ## Overview
 
@@ -68,7 +68,7 @@ sbatch slurm/run_bench.sbatch
 
 ```bibtex
 @inproceedings{gac2026,
-  title={When Smaller Is Slower: Dimensional Collapse in LLM Compressions},
+  title={When Smaller Is Slower: Dimensional Collapse in Compressed LLMs},
   author={Anonymous},
   booktitle={EuroMLSys},
   year={2026}

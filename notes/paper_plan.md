@@ -1,7 +1,7 @@
 # GAC Paper Plan (EuroMLSys Workshop, 6 pages)
 
 ## Title
-"When Smaller Is Slower: Dimensional Collapse in LLM Compressions"
+"When Smaller Is Slower: Dimensional Collapse in Compressed LLMs"
 
 ## Core Message
 维度对齐是压缩算法设计中被忽视的系统约束，考虑它能获得 free speedup。

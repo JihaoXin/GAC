@@ -5,7 +5,7 @@ paper:
     font_size: 10pt
     pages: 6
   template: SIGPLAN (acmart)
-  title: 'When Smaller Is Slower: Dimensional Collapse in LLM Compressions'
+  title: 'When Smaller Is Slower: Dimensional Collapse in Compressed LLMs'
   venue: EuroMLSys
 review_focus:
 - technical_quality: 40%

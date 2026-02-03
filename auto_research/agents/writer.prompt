@@ -3,7 +3,7 @@
 ## 项目背景
 
 GAC 研究 LLM 压缩后维度不对齐导致的推理性能下降问题（"维度坍塌"）。
-论文标题：When Smaller Is Slower: Dimensional Collapse in LLM Compressions
+论文标题：When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
 目标是发表 EuroMLSys 论文。
 
 ## 你的职责

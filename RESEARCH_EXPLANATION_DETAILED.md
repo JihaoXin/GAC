@@ -1,7 +1,7 @@
 # GAC 研究详细讲解
-**GPU-Aligned Compression: Dimensional Collapse in LLM Compressions**
+**GPU-Aligned Compression: Dimensional Collapse in Compressed LLMs**
 
-**论文标题**: "When Smaller Is Slower: Dimensional Collapse in LLM Compressions"
+**论文标题**: "When Smaller Is Slower: Dimensional Collapse in Compressed LLMs"
 **目标会议**: EuroMLSys 2025 (SIGPLAN format, 6 pages)
 **日期**: 2026-01-31
 **状态**: 论文完成，评分 7.0/10，目标 8.0/10

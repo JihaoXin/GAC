@@ -1,5 +1,5 @@
 %%
-%% GAC: When Smaller Is Slower — Dimensional Collapse in LLM Compressions
+%% GAC: When Smaller Is Slower — Dimensional Collapse in Compressed LLMs
 %% Target: EuroMLSys 2026 (SIGPLAN format, 6 pages excluding references)
 %%
 
@@ -32,7 +32,7 @@
 }
 
 %% Title
-\title{When Smaller Is Slower: Dimensional Collapse in LLM Compressions}
+\title{When Smaller Is Slower: Dimensional Collapse in Compressed LLMs}
 
 %% Authors
 \author{Jihao Xin}
@@ -67,7 +67,7 @@
 
 \begin{abstract}
 Post-training compression can produce irregular tensor dimensions that cause GPU slowdowns despite reducing FLOPs---a phenomenon we term \emph{dimensional collapse}.
-We systematically diagnose three root causes on NVIDIA A100: Tensor Core misalignment (58\%), vectorized load degradation (50\%), and SDPA bandwidth inefficiency (40\%).
+We systematically diagnose three root causes on NVIDIA A100: Tensor Core misalignment (58\%), vectorized load (LDG) degradation (50\%), and L2 cache sector waste (5.8\%, minor).
 We then propose \textbf{GAC} (GPU-Aligned Compression), a multi-choice knapsack algorithm that selects aligned rank allocations during compression.
 On Llama-3-8B with SVD compression (ratio 0.7), GAC achieves the best perplexity (14.30) among all allocation strategies at the same parameter budget, while guaranteeing 100\% dimension alignment---compared to unconstrained allocation which leaves 41\% of dimensions misaligned with 10.4\% latency overhead and worse perplexity (14.44).
 For existing compressed models, post-hoc dimension repair recovers 22--28\% kernel speedup with 3.7\% memory overhead.
@@ -245,7 +245,7 @@ $d$ & AUTO & FLASH & MEM\_EFF & MATH \\
 \label{sec:root_cause}
 
 We isolate hardware-level causes using Nsight Compute profiling.
-Figure~\ref{fig:analysis_detail} and Table~\ref{tab:hardware} summarize four hypotheses.
+Figure~\ref{fig:analysis_detail} and Table~\ref{tab:hardware} summarize three hypotheses.
 
 \begin{figure}[t]
 \centering

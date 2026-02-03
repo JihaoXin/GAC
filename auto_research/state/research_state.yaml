@@ -377,6 +377,6 @@ phases:
     status: blocked
 project:
   latex_dir: Latex
-  name: Dimensional Collapse in LLM Compressions
+  name: Dimensional Collapse in Compressed LLMs
   report_file: report.md
   target: EuroMLSys submission (SIGPLAN, 6 pages)

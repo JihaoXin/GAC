@@ -1,6 +1,6 @@
 %%
 %% GAC Advisor Presentation
-%% When Smaller Is Slower: Dimensional Collapse in LLM Compressions
+%% When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
 %%
 \documentclass[aspectratio=169,10pt]{beamer}
 
@@ -8,7 +8,7 @@
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{tikz}
-\usetikzlibrary{positioning,decorations.pathreplacing}
+\usetikzlibrary{positioning,decorations.pathreplacing,fit,backgrounds}
 \usepackage{amsmath}
 \usepackage{xcolor}
 \usepackage{colortbl}
@@ -23,7 +23,7 @@
 \setbeamercolor{progress bar}{fg=cblue}
 
 \title{When Smaller Is Slower}
-\subtitle{Dimensional Collapse in LLM Compressions}
+\subtitle{Dimensional Collapse in Compressed LLMs}
 \author{Jihao Xin}
 \institute{KAUST}
 \date{February 2026}
@@ -80,9 +80,9 @@ Decode is memory-bound --- smaller weights $\Rightarrow$ faster token generation
 \vspace{0.3cm}
 \textbf{Common methods}:
 \begin{itemize}
-\item Quantization (reduce precision)
-\item Pruning (remove neurons/heads)
-\item \textbf{SVD / Low-Rank} (factorize weights)
+\item Quantization
+\item Sparsification
+\item \textbf{Low-Dimensional Compression}
 \end{itemize}
 \end{column}
 \end{columns}
@@ -91,7 +91,7 @@ Decode is memory-bound --- smaller weights $\Rightarrow$ faster token generation
 % ------------------------------------------------------------
 \begin{frame}{Compression Changes Tensor Dimensions}
 
-\textbf{Key insight}: Many compression techniques alter the \emph{shape} of weight tensors.
+\textbf{Key insight}: Many compression techniques alter the \emph{shape} of tensors.
 
 \vspace{0.3cm}
 \begin{center}
@@ -136,6 +136,51 @@ Example: Llama-3-8B with PaLU ($r$=0.7) produces ranks like 107, 149, 305 --- no
 % ------------------------------------------------------------
 \begin{frame}{Three Compression Types That Change Dimensions}
 \begin{center}
+\begin{tikzpicture}[scale=0.65, every node/.style={scale=0.65},
+    dim/.style={<->, line width=0.7pt, gray!80!black},
+    dlabel/.style={font=\sffamily\bfseries, fill=white, inner sep=1pt}]
+  % GEMM label (left side)
+  \node[font=\sffamily\bfseries, anchor=east] at (-1.2,1.8) {GEMM:};
+  \node[font=\sffamily, anchor=east] at (-1.2,0.8) {$C = A \times B$};
+
+  % --- Matrix A: M rows × K cols ---
+  \fill[white] (0,0) rectangle (1.6,2.6);
+  \draw[line width=0.8pt] (0,0) rectangle (1.6,2.6);
+  \node at (0.8,1.3) {\large $A$};
+  % M arrow (left)
+  \draw[dim] (-0.4,0) -- (-0.4,2.6) node[midway, dlabel] {$M$};
+  % K arrow (top)
+  \draw[dim] (0,3.0) -- (1.6,3.0) node[midway, dlabel] {$K$};
+
+  % × sign
+  \node at (2.4,1.8) {\LARGE $\times$};
+
+  % --- Matrix B: K rows × N cols ---
+  \fill[white] (3.2,1.0) rectangle (5.8,2.6);
+  \draw[line width=0.8pt] (3.2,1.0) rectangle (5.8,2.6);
+  \node at (4.5,1.8) {\large $B$};
+  % K arrow (left)
+  \draw[dim] (2.9,1.0) -- (2.9,2.6) node[midway, dlabel] {$K$};
+  % N arrow (top)
+  \draw[dim] (3.2,3.0) -- (5.8,3.0) node[midway, dlabel] {$N$};
+
+  % = sign
+  \node at (6.6,1.3) {\LARGE $=$};
+
+  % --- Matrix C: M rows × N cols ---
+  \fill[white] (7.4,0) rectangle (10.0,2.6);
+  \draw[line width=0.8pt] (7.4,0) rectangle (10.0,2.6);
+  \node at (8.7,1.3) {\large $C$};
+  % M arrow (left)
+  \draw[dim] (7.1,0) -- (7.1,2.6) node[midway, dlabel] {$M$};
+  % N arrow (top)
+  \draw[dim] (7.4,3.0) -- (10.0,3.0) node[midway, dlabel] {$N$};
+
+\end{tikzpicture}
+\end{center}
+
+\vspace{0.15cm}
+\begin{center}
 \begin{tikzpicture}[scale=0.82, every node/.style={scale=0.82},
     >=stealth,
     box/.style={draw, rounded corners=4pt, minimum width=3.8cm, minimum height=2.6cm,
@@ -143,37 +188,32 @@ Example: Llama-3-8B with PaLU ($r$=0.7) produces ranks like 107, 149, 305 --- no
   ]
   % SVD
   \node[box, fill=cblue!12] (svd) at (0,0) {
-    \textbf{\normalsize SVD / Low-Rank}\\[4pt]
+    \textbf{\normalsize Factorization}\\[4pt]
     $W \to A \cdot B$\\[2pt]
-    {\scriptsize changes \textbf{inner rank} ($K$ dim)}\\[2pt]
     {\scriptsize PaLU, SVD-LLM, ASVD}\\[4pt]
-    \textcolor{cred}{\textbf{Most alignment-sensitive}}
+    \textcolor{gray}{changes $K$}
   };
   % Pruning
   \node[box, fill=cgreen!12] (prune) at (5.8,0) {
     \textbf{\normalsize Pruning}\\[4pt]
     Remove columns/heads\\[2pt]
-    {\scriptsize changes \textbf{output features} ($N$ dim)}\\[2pt]
     {\scriptsize SliceGPT, LLM-Pruner}\\[4pt]
-    \textcolor{corange}{\textbf{Sensitive + kernel cliffs}}
+    \textcolor{gray}{changes $N$}
   };
   % Token eviction
   \node[box, fill=corange!12] (token) at (11.6,0) {
     \textbf{\normalsize Token Eviction}\\[4pt]
     Drop KV entries\\[2pt]
-    {\scriptsize changes \textbf{seq length} ($M$ dim)}\\[2pt]
     {\scriptsize H$_2$O, StreamLLM}\\[4pt]
-    \textcolor{cgreen}{\textbf{Not alignment-sensitive}}\\[-1pt]
-    {\scriptsize but heuristic cliffs}
+    \textcolor{gray}{changes $M$}
   };
 \end{tikzpicture}
 \end{center}
 
-\vspace{0.2cm}
-In GEMM $C_{M \times N} = A_{M \times K} \cdot B_{K \times N}$, each compression type alters a different matrix dimension. GPU performance is \textbf{nonlinearly sensitive} to these dimensions.
+\vspace{-0.15cm}
+\small
+Each compression type alters a different GEMM dimension.\\ GPU performance is \textbf{nonlinearly sensitive} to these dimensions.
 
-\vspace{0.3cm}
-\textbf{This work}: Focus on SVD compression, where ranks are set by importance scoring and naturally produce irregular values. Results generalize to any technique that changes $K$ or $N$.
 \end{frame}
 
 % ------------------------------------------------------------
@@ -184,77 +224,83 @@ In GEMM $C_{M \times N} = A_{M \times K} \cdot B_{K \times N}$, each compression
 \centering
 \textbf{Motivating Example}\\[0.2cm]
 \small
-\begin{tabular}{lcc}
+\begin{tabular}{lccc}
 \toprule
-& $d$=107 & $d$=112 \\
+& $d$=107 & $d$=112 & \textbf{Penalty} \\
 \midrule
-GEMM & 0.089\,ms & 0.050\,ms \\
-SDPA & 2.14\,ms & 1.53\,ms \\
-\midrule
-\textbf{Penalty} & \textcolor{cred}{\textbf{+78\%}} & baseline \\
+GEMM & 0.089\,ms & 0.050\,ms & \textcolor{cred}{\textbf{+78\%}} \\
+SDPA & 2.14\,ms & 1.53\,ms & \textcolor{cred}{\textbf{+40\%}} \\
 \bottomrule
 \end{tabular}
 
 \vspace{0.3cm}
 \normalsize
 $107 \bmod 8 \neq 0$\\[0.1cm]
-$\Rightarrow$ Tensor Core misalignment\\
-$\Rightarrow$ SDPA backend fallback\\
-$\Rightarrow$ Vectorized load degradation
+$\Rightarrow$ Inefficient PyTorch backend.\\
+$\Rightarrow$ Inefficient CUDA kernel\\
+$\Rightarrow$ Low-utilization of GPU
 \end{column}
 \begin{column}{0.5\textwidth}
 \centering
-\textbf{Worse: entire attention block affected}\\[0.2cm]
 \includegraphics[width=0.9\textwidth]{figures/fig3_palu_dist.pdf}
 
 \vspace{0.1cm}
 \small
-PaLU rank distribution: ranks like 102, 107 flow into SDPA as head\_dim, triggering \textbf{MATH backend fallback} (12$\times$ slower).
+A real example: PaLU on Llama-3-8B, compress 20\% \\
+\textbf{78\% layers are misaligned}.
 \end{column}
 \end{columns}
 
 \vspace{0.2cm}
-We call this \textbf{dimensional collapse}: nonlinear performance cliffs from misaligned tensor shapes after compression.
+We call this \textbf{Dimensional Collapse}.
 \end{frame}
 
 % ------------------------------------------------------------
-\begin{frame}{How Common Is Misalignment?}
-\begin{columns}
-\begin{column}{0.55\textwidth}
-\includegraphics[width=\textwidth]{figures/scatter_meta_llama_3_8b_instruct_r0.8.pdf}
-\end{column}
-\begin{column}{0.45\textwidth}
-\textbf{Llama-3-8B}, $r$=0.8, unconstrained SVD:
+\begin{frame}{Budget Allocation: How Are Dimensions Decided?}
 
-\vspace{0.3cm}
-\begin{itemize}
-\item Fisher: \textcolor{cred}{70\%} misaligned
-\item Magnitude: \textcolor{cred}{79\%} misaligned
-\item Activation: \textcolor{cred}{81\%} misaligned
-\item Gradient: \textcolor{cred}{52\%} misaligned
-\end{itemize}
-
-\vspace{0.3cm}
-Average: \textbf{70.5\%} of dimensions are non-8-aligned.
-
-\vspace{0.3cm}
-RAP SVD: \textbf{100\%} misaligned ($d$=102).
-
-\vspace{0.3cm}
-$\Rightarrow$ \textbf{Structural property}, not edge case.
+\textbf{Current practice}: Given a compression ratio $\rho$, allocate budget based on importance score.
 
 \vspace{0.2cm}
-$\Rightarrow$ Affects \textbf{every} SVD-based method.
-\end{column}
-\end{columns}
+Each method uses a different \textbf{importance score} to allocate per-layer rank $r_i$:
+
+\vspace{0.2cm}
+\begin{table}
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Method} & \textbf{Score} & \textbf{Intuition} & \textbf{Works} \\
+\midrule
+Magnitude & $\|W_i\|_F$ & Weight norm & SVD-LLM \\
+Activation & $\|X_i\|_F$ & Input magnitude & ASVD \\
+Gradient & $\left|\frac{\partial \mathcal{L}}{\partial h_i} \cdot h_i\right|$ & Taylor expansion & Taylor Pruning \\
+Fisher & $\mathrm{tr}(\mathbf{F}_i)$ & Curvature of loss & PaLU, FWSVD \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.2cm}
+Scores are \textbf{continuous-valued} $\Rightarrow$ allocated ranks are naturally \textbf{irregular}.
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Misalignment Is Universal Across All Methods}
+\begin{center}
+\includegraphics[width=0.85\textwidth]{figures/scatter_2x2_meta_llama_3_8b_instruct_r0.8.pdf}
+\end{center}
+
+\vspace{-0.1cm}
+\small
+\textbf{Llama-3-8B}, $r$=0.8. \textcolor{cred}{Red} = misaligned ($d \bmod 8 \neq 0$), \textcolor{cgreen}{green} = 8-aligned. \\
+All four methods produce \textbf{50--80\% misaligned} dimensions $\Rightarrow$ structural problem, not edge case.
 \end{frame}
 
 
 % ============================================================
-\section{Three-Layer Analysis}
+\section{Full-Stack Analysis}
 % ============================================================
 
-\begin{frame}{Analysis Overview: Three Layers}
+\begin{frame}{Analysis Overview: Full Stack}
 \begin{center}
 \begin{tikzpicture}[
     layer/.style={draw, rounded corners=5pt, minimum width=12cm, minimum height=1.3cm,
@@ -262,45 +308,70 @@ $\Rightarrow$ Affects \textbf{every} SVD-based method.
     >=stealth
   ]
   \node[layer, fill=cred!10] (hw) at (0,0) {
-    \textbf{Hardware Layer}: Tensor Core MMA, Vectorized Loads, L2 Cache, CTA Wave
+    \textbf{Hardware Layer}\\ e.g. extra CTA waves, uncoalesced memory access.
   };
   \node[layer, fill=corange!10] (lib) at (0,1.8) {
-    \textbf{Library Layer}: cuBLAS kernel tier (Tier 1/2/3), heuristic cliff points
+    \textbf{Library Layer}\\ e.g. cuBLAS selects suboptimal kernel.
   };
   \node[layer, fill=cblue!10] (fw) at (0,3.6) {
-    \textbf{Framework Layer}: SDPA backend fallback, FA2 template selection
+    \textbf{Framework Layer}\\ e.g. PyTorch cannot launch flash attention.
   };
-
-  \node[left=0.3cm of fw, font=\sffamily\small, text=cblue] {SDPA};
-  \node[left=0.3cm of lib, font=\sffamily\small, text=corange] {GEMM};
-  \node[left=0.3cm of hw, font=\sffamily\small, text=cred] {HW};
 
   \draw[->, line width=1.2pt, gray] (fw.south) -- (lib.north) node[midway, right=0.2cm, font=\small] {dispatches to};
   \draw[->, line width=1.2pt, gray] (lib.south) -- (hw.north) node[midway, right=0.2cm, font=\small] {executes on};
 \end{tikzpicture}
 \end{center}
-
-\vspace{0.2cm}
-Each layer reveals phenomena $\to$ explains mechanisms $\to$ constraints naturally emerge.
 \end{frame}
 
 % ------------------------------------------------------------
-\begin{frame}{GEMM Alignment Sensitivity}
-\begin{center}
-\includegraphics[width=0.95\textwidth]{figures/fig_gemm_alignment.pdf}
-\end{center}
-
+\begin{frame}{Framework Layer: PyTorch SDPA Backend Selection}
 \vspace{-0.2cm}
 \small
-\textbf{Key findings}: $K$ and $N$ show clear mod-8 alignment penalty (up to 30\%). $M$ is alignment-insensitive but has kernel heuristic cliffs ($M$=1728$\to$1729: +30\%).
+\textbf{Experiment}: Profile PyTorch SDPA function with head dimension $d$=64--256 on A100.
+
+\vspace{-0.1cm}
+\begin{columns}[T]
+\begin{column}{0.52\textwidth}
+\includegraphics[width=\textwidth]{figures/fig2_sdpa_latency.pdf}
+\end{column}
+\begin{column}{0.46\textwidth}
+\small
+\textbf{Findings}:
+\begin{itemize}\setlength\itemsep{4pt}
+\item $d \bmod 8 = 0$: calls \textbf{FlashAttention-2}, otherwise falls back to \textbf{Math backend}
+\item $d \bmod 32 = 0$: Perfectly aligned with FA2 template, e.g. less branching and padding overhead.\\
+\end{itemize}
+\end{column}
+\end{columns}
 \end{frame}
 
 % ------------------------------------------------------------
-\begin{frame}{cuBLAS Kernel Tier System (NCU Profiling)}
+\begin{frame}{Library Layer: GEMM Alignment Sensitivity}
+\vspace{-0.2cm}
+\small
+\textbf{Experiment}: Profile cuBLAS \texttt{fp16} GEMM, sweep each dimension ($M$, $N$, $K$) individually on A100.
 
-cuBLAS selects different kernel families based on dimension alignment:
+\vspace{-0.1cm}
+\begin{center}
+\includegraphics[width=\textwidth]{figures/fig_gemm_alignment.pdf}
+\end{center}
 
-\vspace{0.2cm}
+\vspace{-0.3cm}
+\small
+\textbf{Findings}:
+\begin{itemize}\setlength\itemsep{2pt}
+\item \textbf{Alignment}: $N$ and $K$ show clear \textbf{mod-8 penalty}.
+\item \textbf{Cliff}: $M$ and $N$ have \textbf{performance cliffs} where cuBLAS switches CTA tile size.
+\end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Library Layer: Why? cuBLAS Kernel Tier System}
+\vspace{-0.1cm}
+\small
+\textbf{Experiment}: Profile cuBLAS kernel selection with Nsight Compute on A100.
+
+\vspace{0.1cm}
 \begin{table}
 \centering
 \small
@@ -316,83 +387,30 @@ cuBLAS selects different kernel families based on dimension alignment:
 \end{table}
 
 \vspace{0.1cm}
-\textbf{Tier 3 penalty}: MMA instruction downgrade (half compute/instruction) + scalar loads (vs float4 vectorized).
-
-\vspace{0.2cm}
-\textbf{Additionally}: cuBLAS heuristic selects CTA tile sizes that create \textbf{cliff points} at non-obvious dimension boundaries (e.g., $M$=1728$\to$1729).
-
-\vspace{0.2cm}
-\footnotesize
-Verified with Nsight Compute: $K$=65 $\to$ \texttt{cutlass\_75\_...align1} (229 regs); $K$=66 $\to$ \texttt{cutlass\_80\_...align2} (213 regs).
-\end{frame}
-
-% ------------------------------------------------------------
-\begin{frame}{SDPA: FlashAttention-2 Template Staircase}
-\begin{columns}
-\begin{column}{0.5\textwidth}
-\includegraphics[width=\textwidth]{figures/fig2_sdpa_latency.pdf}
-\end{column}
-\begin{column}{0.5\textwidth}
-\textbf{FA2 template selection}:\\
-smallest $t \geq d$ from $\{64, 96, 128, 160, 192, 224, 256\}$
-
-\vspace{0.3cm}
-\small
-\begin{tabular}{lll}
-\toprule
-Template & $B_r \times B_c$ & vs $t$=64 \\
-\midrule
-64 & 128$\times$128 & 1.0$\times$ \\
-96 & 128$\times$64 & 1.5$\times$ \\
-128 & 128$\times$64 & 2.0$\times$ \\
-160 & 128$\times$32 & 2.7$\times$ \\
-192--256 & 128$\times$32 & 3--4$\times$ \\
-\bottomrule
-\end{tabular}
-
-\vspace{0.3cm}
-\normalsize
-\textbf{Key cliff}: $d$=128$\to$129\\
-$B_c$: 64$\to$32 $\Rightarrow$ \textcolor{cred}{\textbf{+90\%}} latency
-
-\vspace{0.2cm}
-\textbf{Backend fallback}:\\
-$d \bmod 8 \neq 0$ $\Rightarrow$ MATH (\textcolor{cred}{12$\times$ slower})
-\end{column}
-\end{columns}
-\end{frame}
-
-% ------------------------------------------------------------
-\begin{frame}{Root Cause Analysis (Hardware Layer)}
-\begin{columns}
-\begin{column}{0.45\textwidth}
-\includegraphics[width=\textwidth]{figures/fig4_root_cause.pdf}
-\end{column}
-\begin{column}{0.55\textwidth}
-\begin{table}
-\small
-\begin{tabular}{llrl}
-\toprule
-Hypothesis & Status & Impact \\
-\midrule
-H1: TC K\%16 & \textcolor{cgreen}{\textbf{Confirmed}} & 58\% \\
-H2: L2 sector & \textcolor{cred}{Not confirmed} & 5.8\% \\
-H3: SDPA BW & \textcolor{cgreen}{\textbf{Confirmed}} & 40\% \\
-H4: Vec.\ loads & \textcolor{cgreen}{\textbf{Confirmed}} & 50\% \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\vspace{0.3cm}
-\textbf{Hardware layer role}: explanatory.
-
-\begin{itemize}
-\item Explains \emph{why} kernel tiers exist (TC + VecLoad alignment requirements)
-\item \textbf{Negative H2}: L2 cache line (128B) misalignment is masked by GEMM tiling $\Rightarrow$ not a bottleneck
-\item No new constraints beyond library layer
+\textbf{Reasons}:
+\begin{itemize}\setlength\itemsep{2pt}
+\item \textbf{Alignment}: $K$/$N$ alignment determines kernel tier; lower tier $\Rightarrow$ weaker MMA instruction + scalar loads. $M$ is row dimension, not affected by alignment.
+\item \textbf{Cliff}: cuBLAS heuristic selects CTA tile size, but switches at non-obvious boundaries (e.g., $M$=1728$\to$1729), causing sudden latency jumps.
 \end{itemize}
-\end{column}
-\end{columns}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Hardware Layer: Why Misalignment Hurts (Working)}
+\vspace{-0.1cm}
+
+\begin{itemize}\setlength\itemsep{6pt}
+\item \textbf{Tensor Core} --- \texttt{mma.m16n8k16}.\\
+  Misaligned forces fallback from \texttt{HMMA} to \texttt{FFMA} (scalar FP math).
+
+\item \textbf{Vectorized Loads} --- \texttt{LDG.128} requires $\text{dim} \bmod 8 = 0$\\
+  Misaligned dim falls back to scalar \texttt{LDG.32}, 4$\times$ fewer bytes per instruction.
+
+\item \textbf{L2 Cache Sectors} --- 32-byte fetch granularity\\
+  Non-aligned row stride wastes partial sectors, but GEMM tiling largely masks this.
+\end{itemize}
+
+\vspace{0.3cm}
+\textbf{Takeaway}: The first two mechanisms explain \emph{why} cuBLAS kernel tiers and SDPA backend fallbacks exist at the library/framework level.
 \end{frame}
 
 % ------------------------------------------------------------
@@ -400,377 +418,240 @@ H4: Vec.\ loads & \textcolor{cgreen}{\textbf{Confirmed}} & 50\% \\
 \begin{table}
 \centering
 \small
-\begin{tabular}{@{}llll@{}}
+\begin{tabular}{@{}lll@{}}
 \toprule
-\textbf{Layer} & \textbf{Mechanism} & \textbf{Constraint} & \textbf{Penalty} \\
+\textbf{Layer} & \textbf{Finding} & \textbf{Constraint} \\
 \midrule
-\rowcolor{cblue!8} PyTorch & SDPA backend & $d \bmod 8 = 0$ & 2--5$\times$ fallback \\
-\rowcolor{cblue!8} FA2 & Template tier & $d \leq$ template & $B_c$ halved/step \\
-\rowcolor{cblue!8} FA2 & \texttt{is\_even\_K} & $d =$ template & bounds check skip \\
-\rowcolor{cblue!8} FA2 & Padding waste & $d \approx$ template & 15--25\% waste \\
-\rowcolor{corange!8} cuBLAS & Kernel tier & dim\%8=0 & $\sim$25\% \\
-\rowcolor{corange!8} cuBLAS & Heuristic cliff & dim in sweet spot & 30--60\% \\
-\rowcolor{cred!8} Hardware & Vec.\ loads & ld.dim\%8=0 & 4--8$\times$ BW \\
-\rowcolor{cred!8} Hardware & CTA wave & CTAs $\approx k \cdot$ SMs & SM idle \\
+\rowcolor{cblue!8} Framework & SDPA backend selection & $d \bmod 8 = 0$ \\
+\rowcolor{cblue!8} Framework & FA2 template alignment & $d \bmod 32 = 0$ \\
+\midrule
+\rowcolor{corange!8} Library & cuBLAS kernel tier & $K$/$N$ $\bmod$ 8 = 0 \\
+\rowcolor{corange!8} Library & Kernel cliff & heuristics of sweet spot \\
+\midrule
+\rowcolor{cred!8} Hardware & Tensor Core & $m16n8k16$ \\
+\rowcolor{cred!8} Hardware & Vectorized loads & dim $\bmod$ 8 = 0 \\
+\rowcolor{cred!8} Hardware & L2 cache sector & dim $\bmod$ 16 = 0 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \vspace{0.3cm}
-These constraints feed into the GAC framework design.
 \end{frame}
 
 
 % ============================================================
-\section{GAC Framework}
+\section{GAC: GPU-Aligned Compression \\ The New Compression Paradigm}
 % ============================================================
 
 \begin{frame}{GAC Framework Overview}
+\vspace{0.3cm}
 \begin{center}
-\begin{tikzpicture}[scale=0.68, every node/.style={scale=0.68},
+\begin{tikzpicture}[
     >=stealth,
-    phase/.style={draw, rounded corners=4pt, minimum width=1.8cm, minimum height=1.0cm,
-                  line width=0.7pt, text=white, font=\sffamily\small, align=center},
-    cbox/.style={draw, rounded corners=3pt, minimum width=2.0cm, minimum height=2.2cm,
-                 line width=0.7pt, font=\sffamily\scriptsize, align=center,
-                 fill=yellow!12, draw=orange!60!black},
-    arrow/.style={->, line width=1.2pt, color=gray!70!black},
+    box/.style={draw, rounded corners=3pt, minimum width=3.2cm, minimum height=1.1cm,
+                line width=0.6pt, font=\sffamily\small, align=center},
+    arr/.style={->, line width=1.2pt, color=gray!60!black},
   ]
-  % Input
-  \node[draw, rounded corners=3pt, fill=white, line width=0.7pt,
-        font=\sffamily\scriptsize, align=center, minimum width=1.6cm]
-    (input) at (-2.8, -0.3) {Pre-trained\\LLM\\+ budget $B$};
 
-  % Analysis
-  \node[phase, fill=gray!50, text=black, minimum width=1.6cm, minimum height=0.8cm]
-    (sdpa) at (0, 1.0) {\textbf{SDPA}};
-  \node[phase, fill=gray!50, text=black, minimum width=1.6cm, minimum height=0.8cm]
-    (gemm) at (0, -0.3) {\textbf{GEMM}};
-  \node[phase, fill=gray!50, text=black, minimum width=1.6cm, minimum height=0.8cm]
-    (hw) at (0, -1.6) {\textbf{Hardware}};
-  \node[above=0.1cm of sdpa, font=\sffamily\bfseries\scriptsize] {Analysis};
+  %% Left column: Input / Output
+  \node[box, fill=gray!8, draw=gray!50] (input) at (0, 0)
+    {\textbf{Input}\\[-1pt]{\scriptsize Model + $\rho$ + Compressor}};
+  \node[box, fill=cgreen!10, draw=cgreen!60] (output) at (0, -4.4)
+    {\textbf{Output}\\[-1pt]{\scriptsize Aligned Compressed Model}};
 
-  \draw[arrow] (input) -- (gemm);
+  %% Right column: 3 steps
+  \node[box, fill=cblue!10, draw=cblue!60] (ident) at (5.6, 0)
+    {\textbf{Operator Analysis}\\[-1pt]{\scriptsize SDPA / GEMM / GeMV}};
+  \node[box, fill=corange!10, draw=corange!60] (sweep) at (5.6, -2.2)
+    {\textbf{Dimension Sweep}\\[-1pt]{\scriptsize Candidate Table}};
+  \node[box, fill=violet!8, draw=violet!50] (opt) at (5.6, -4.4)
+    {\textbf{Constrained Optimization}\\[-1pt]{\scriptsize Knapsack and DP}};
 
-  % Constraints
-  \node[cbox] (cons) at (3.2, -0.3) {};
-  \node[above=-0.05cm of cons.north, font=\sffamily\bfseries\scriptsize] {Constraints};
-  \node[font=\sffamily\tiny, align=left, anchor=north] at ([yshift=-0.25cm]cons.north) {
-    $d \bmod 8 = 0$\\[0.5pt]
-    $d \leq$ FA2 template\\[0.5pt]
-    dim\%8 kernel tier\\[0.5pt]
-    avoid cliff dims\\[0.5pt]
-    CTA wave quant.
-  };
+  %% Arrows
+  \draw[arr] (input)  -- (ident);
+  \draw[arr] (ident)  -- (sweep);
+  \draw[arr] (sweep)  -- (opt);
+  \draw[arr] (opt)    -- (output);
 
-  \draw[arrow] (sdpa.east) -- ++(0.4,0) |- ([yshift=0.5cm]cons.west);
-  \draw[arrow] (gemm.east) -- (cons.west);
-  \draw[arrow] (hw.east) -- ++(0.4,0) |- ([yshift=-0.5cm]cons.west);
-
-  % Path A
-  \node[phase, fill=cblue] (score) at (6.2, 0.8) {\textbf{Score}\\[-1pt]{\tiny Fisher}};
-  \node[phase, fill=cblue] (dp) at (8.6, 0.8) {\textbf{DP Solve}\\[-1pt]{\tiny knapsack}};
-  \node[phase, fill=cblue] (svd) at (11.0, 0.8) {\textbf{SVD}\\[-1pt]{\tiny aligned}};
-
-  % Path B
-  \node[phase, fill=cgreen] (detect) at (6.2, -1.4) {\textbf{Detect}\\[-1pt]{\tiny misaligned}};
-  \node[phase, fill=cgreen] (pad) at (8.6, -1.4) {\textbf{Zero-Pad}\\[-1pt]{\tiny $d{\to}\lceil d/a\rceil{\cdot}a$}};
-  \node[phase, fill=cgreen] (exact) at (11.0, -1.4) {\textbf{Bit-Exact}\\[-1pt]{\tiny output}};
-
-  % Arrows within paths
-  \draw[arrow, color=cblue] (score) -- (dp);
-  \draw[arrow, color=cblue] (dp) -- (svd);
-  \draw[arrow, color=cgreen] (detect) -- (pad);
-  \draw[arrow, color=cgreen] (pad) -- (exact);
-
-  % Constraints -> paths
-  \draw[arrow] (cons.east) -- ++(0.5,0) |- (score.west);
-  \draw[arrow] (cons.east) -- ++(0.5,0) |- (detect.west);
-
-  % Path labels
-  \node[above=0.1cm of dp, font=\sffamily\bfseries\scriptsize, text=cblue]
-    {Path A: New Compression};
-  \node[below=0.1cm of pad, font=\sffamily\bfseries\scriptsize, text=cgreen]
-    {Path B: Post-Hoc Repair};
-
-  % Results
-  \node[draw, rounded corners=3pt, fill=cblue!8, draw=cblue, line width=1pt,
-        font=\sffamily\scriptsize, align=center, right=0.4cm of svd]
-    (resA) {{\small\bfseries 100\% aligned}\\PPL 14.30};
-  \node[draw, rounded corners=3pt, fill=cgreen!8, draw=cgreen, line width=1pt,
-        font=\sffamily\scriptsize, align=center, right=0.4cm of exact]
-    (resB) {{\small\bfseries +87\% speedup}\\bit-exact};
-  \draw[arrow, color=cblue] (svd) -- (resA);
-  \draw[arrow, color=cgreen] (exact) -- (resB);
 \end{tikzpicture}
 \end{center}
 \end{frame}
 
 % ------------------------------------------------------------
-\begin{frame}{Path A: GAC DP --- Alignment-Aware Rank Allocation}
+\begin{frame}{Constrained Optimization (1/3) --- Problem Setup}
 
-\textbf{Problem}: Given budget $B$, sensitivities $\{s_i\}$, alignment $a$=8:
-\[
-\min_{\{r_i\}} \sum_{i=1}^{n} s_i \cdot |r_i - r_i^*| \;\;\text{s.t.}\;\; \sum_{i} r_i \cdot g = B,\; r_i \bmod a = 0 \;\forall i
-\]
+\textbf{Setting}: 64 weight matrices in Llama-3-8B, $\rho$=0.7, total budget $B$=46k parameters.
 
 \vspace{0.3cm}
-\textbf{Solution}: Multi-choice knapsack DP.
-
-\begin{enumerate}
-\item \textbf{Score}: Fisher information per projection ($n$=64 for Llama-3-8B)
-\item \textbf{Candidates}: Multiples of $a$ near ideal $r_i^*$ ($\pm 8a$, $\sim$17 candidates each)
-\item \textbf{DP Solve}: $O(n \cdot B/a \cdot |C|)$ --- solves in $<$2s on CPU
-\item \textbf{SVD Decompose}: With aligned ranks. No padding needed.
-\end{enumerate}
-
-\vspace{0.3cm}
-\textbf{Key insight}: Global optimization --- sensitive layers round \emph{up}, insensitive layers round \emph{down}. Better than independent rounding.
-\end{frame}
-
-% ------------------------------------------------------------
-\begin{frame}{Path B: Dimension Repair (Post-Hoc)}
-
-For \textbf{already-compressed models} where re-decomposition is impractical:
-
-\vspace{0.3cm}
-\begin{center}
-$d_{\text{pad}} = \lceil d/a \rceil \times a$
-\end{center}
-
-\vspace{0.3cm}
-\textbf{Properties}:
-\begin{itemize}
-\item Zero-padding preserves outputs exactly: $y' = [Wx+b;\,\mathbf{0}]$
-\item \textbf{Bit-exact} --- no retraining, no approximation
-\item Two strategies: MINIMAL ($a$=8, 3.7\% mem) and OPTIMAL ($a$=16, 7.2\% mem)
-\end{itemize}
-
-\vspace{0.3cm}
-\textbf{When does it help?}
-\begin{itemize}
-\item[\textcolor{cgreen}{\checkmark}] Direct SVD (misaligned $d$ flows to SDPA): \textbf{+87\%} mean speedup
-\item[\textcolor{cred}{$\times$}] Projection-based (RAP): head\_dim restored to 128 before SDPA $\Rightarrow$ no benefit
-\end{itemize}
-\end{frame}
-
-
-% ============================================================
-\section{Results}
-% ============================================================
-
-\begin{frame}{Main Result: Rank Allocation Comparison}
-
-\textbf{Llama-3-8B}, $r$=0.7, same total rank budget (46,080):
-
-\vspace{0.2cm}
-\begin{table}
-\centering
-\small
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
-\textbf{Strategy} & \textbf{PPL}$\downarrow$ & \textbf{Aligned} & \textbf{W.Dev}$\downarrow$ & \textbf{Lat.} \\
-\midrule
-Baseline (full) & 11.35 & --- & --- & 1.00$\times$ \\
-PaLU (finetuned) & 12.91 & 64/64 & 11,711 & 1.00$\times$ \\
-\midrule
-\rowcolor{cblue!12} \textbf{GAC DP} & \textbf{14.30} & \textbf{64/64} & \textbf{2,217} & \textbf{1.00$\times$} \\
-Round-to-8 & 14.37 & 64/64 & 2,841 & 1.00$\times$ \\
-Unaligned & 14.44 & 38/64 & 2,723 & 1.10$\times$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\vspace{0.1cm}
-\textbf{GAC DP achieves Pareto dominance} (among SVD-only methods):
-\begin{itemize}\setlength\itemsep{0.1em}
-\item Best PPL (14.30 vs 14.44) \emph{and} 100\% alignment \emph{and} lowest W.Dev
-\item Unaligned: worst PPL + 10\% latency overhead (double penalty)
-\item PaLU gap (12.91): from finetuning, not allocation quality (W.Dev 5$\times$ worse)
-\end{itemize}
-\end{frame}
-
-% ------------------------------------------------------------
-\begin{frame}{Applicability: When Does Repair Help?}
-
-\begin{columns}
-\begin{column}{0.5\textwidth}
-\textbf{\textcolor{cgreen}{Positive}: Direct SVD}\\[0.2cm]
-Compressed $d$ flows directly to SDPA.
-
-\vspace{0.2cm}
-\small
-\begin{tabular}{llr}
-\toprule
-Misaligned & Repaired & Avg Speedup \\
-\midrule
-107 & 112 & \textbf{78.5\%} \\
-114 & 120 & \textbf{80.2\%} \\
-117 & 120 & \textbf{80.7\%} \\
-121 & 128 & \textbf{97.0\%} \\
-125 & 128 & \textbf{98.1\%} \\
-\midrule
-\multicolumn{2}{l}{\textbf{Overall}} & \textbf{86.9\%} \\
-\bottomrule
-\end{tabular}
-
-\normalsize
-\vspace{0.2cm}
-45 workloads ($B{\in}\{1,4,8\}$, $S{\in}\{512,1024,2048\}$).
-\end{column}
-\begin{column}{0.5\textwidth}
-\textbf{\textcolor{cred}{Negative}: RAP (projection-based)}\\[0.2cm]
-$W_A$/$W_B$ restore head\_dim=128 \emph{before} SDPA.
-
-\vspace{0.2cm}
-\small
-\begin{tabular}{lrr}
-\toprule
-Phase & Misaligned & Repaired \\
-\midrule
-Prefill (ms) & 290.5 & 292.9 \\
-Decode (tok/s) & 1009 & 1000 \\
-\bottomrule
-\end{tabular}
-
-\normalsize
-\vspace{0.3cm}
-$\Delta$ = --0.8\% (no benefit).
-
-\vspace{0.3cm}
-$\Rightarrow$ Framework correctly identifies when \emph{not} to apply repair.
-\end{column}
-\end{columns}
-\end{frame}
-
-% ============================================================
-\section{Related Work \& Positioning}
-% ============================================================
-
-\begin{frame}{Related Work: Why Prior Work Missed Alignment}
-\begin{columns}
-\begin{column}{0.5\textwidth}
-\textbf{Hardware-aware compression}:
-\begin{itemize}\setlength\itemsep{0.05em}
-\item AMC [He+ ECCV'18]: RL, aggregate latency
-\item HALP [Li+ ICLR'22]: Latency-budgeted pruning
-\item HALOC [Xiao+ AAAI'23]: Differentiable latency
-\item HAPE [Kim+ TODAES'25]: On-device profiling
-\end{itemize}
-
-\vspace{0.2cm}
-$\Rightarrow$ None model \textbf{alignment} as a first-class constraint.
-\end{column}
-\begin{column}{0.5\textwidth}
-\textbf{Production systems} (reactive):
-\begin{itemize}\setlength\itemsep{0.05em}
-\item PaLU: enforces 32-alignment (not explained)
-\item FA2: 30--45\% overhead for non-optimal $d$
-\item vLLM: \textbf{rejects} unsupported head\_dim
-\item TensorRT: applies runtime padding
-\end{itemize}
-
-\vspace{0.2cm}
-$\Rightarrow$ GAC prevents misalignment \textbf{at compression time}.
-\end{column}
-\end{columns}
-\end{frame}
-
-
-% ============================================================
-\section{Future Work}
-% ============================================================
-
-\begin{frame}{Future Work: H100 / Hopper}
-
-\textbf{Dimensional collapse gets worse on newer hardware.}
+\textbf{Step 1.} Apply existing compressor (e.g. PaLU) $\;\Rightarrow\;$ ideal ranks and Fisher scores:
 
 \vspace{0.2cm}
 \centering
-\small
-\begin{tabular}{lll}
+\begin{tabular}{@{}lcc@{}}
 \toprule
-\textbf{Feature} & \textbf{A100 (Ampere)} & \textbf{H100 (Hopper)} \\
+Projection & $r_i^*$ (ideal rank) & $f_i$ (Fisher score) \\
 \midrule
-Memory transfer & cp.async (SM threads) & \textbf{TMA} (dedicated HW) \\
-TMA alignment & N/A & \textbf{128B hard requirement} \\
-FA version & FA2 (7 templates) & FA3 (\textbf{drops 96, 112}) \\
-TC tile (FP16) & m16n8k16 & m16n8k16 \\
-TC tile (FP8) & N/A & m16n8k32 \\
-SMs & 108 & 132 \\
+$W_1$ (layer 3, k\_proj) & 121.2 & 10.0 \quad {\scriptsize $\leftarrow$ sensitive} \\
+$W_2$ (layer 18, v\_proj) & 89.6 & 0.5 \quad {\scriptsize $\leftarrow$ insensitive} \\
+$W_3$ (layer 7, k\_proj) & 107.3 & 3.0 \quad {\scriptsize $\leftarrow$ medium} \\
+\multicolumn{3}{@{}c@{}}{\footnotesize $\vdots$ \quad (64 projections total)} \\
 \bottomrule
 \end{tabular}
-
 \raggedright
-\normalsize
-\vspace{0.3cm}
-\textbf{Key implication}: A100's L2 misalignment was negligible (H2: 5.8\%). On H100, TMA's 128B alignment is a \textbf{hard constraint} --- our negative H2 result may become positive.
-
-\vspace{0.2cm}
-\textbf{Other}: Finetuning after GAC to close PaLU gap (12.91 vs 14.30).
-\end{frame}
-
-
-% ============================================================
-\section{Summary}
-% ============================================================
-
-\begin{frame}{Summary}
-
-\textbf{Contributions}:
-\begin{enumerate}\setlength\itemsep{0.05em}
-\item \textbf{Systematic diagnosis}: Three-layer analysis of dimensional collapse with NCU profiling
-\item \textbf{GAC algorithm}: Multi-choice knapsack DP --- Pareto dominance (better PPL + 100\% alignment)
-\item \textbf{Dimension repair}: Post-hoc zero-padding (+87\% speedup, bit-exact)
-\item \textbf{Applicability framework}: When repair helps (direct SVD) vs.\ not (projection-based)
-\end{enumerate}
-
-\vspace{0.3cm}
-\textbf{Key numbers}:
-\begin{itemize}\setlength\itemsep{0.05em}
-\item 43--91\% of unconstrained SVD ranks are misaligned
-\item Up to 88\% SDPA latency increase from misalignment
-\item GAC DP: PPL 14.30 (best among SVD-only), 100\% aligned, $<$2s to solve
-\end{itemize}
-
-\vspace{0.3cm}
-\centering
-Target: \textbf{EuroMLSys 2026}
-\end{frame}
-
-% ============================================================
-\begin{frame}{Next Steps}
-
-\textbf{Deadline: 24 Feb 2026}
 
 \vspace{0.4cm}
+\textbf{Problem}: These ideal ranks are \textbf{fractional} (121.2, 89.6, 107.3, \ldots).\\
+PaLU truncates to integers $\Rightarrow$ \textcolor{cred}{107 hits every GPU cliff we found.}\\[0.2cm]
+\textbf{How to round them to hardware-friendly values?}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Constrained Optimization (2/3) --- Candidate Generation}
+
+\textbf{Step 2.} Dim Sweep near each $r_i^*$ $\;\Rightarrow\;$ keep only \textbf{good} dimensions:
+
+\vspace{0.3cm}
+\centering
+\begin{tabular}{@{}lcl@{}}
+\toprule
+Projection & $r_i^*$ & Candidates $C_i$ (low-latency dims from Dim Sweep) \\
+\midrule
+$W_1$ ($f$=10.0) & 121.2 & \{112, 120, 128\} \\
+$W_2$ ($f$=0.5) & 89.6 & \{80, 88, 96\} \\
+$W_3$ ($f$=3.0) & 107.3 & \{96, 104, 112, 128\} \quad {\scriptsize 107 excluded --- cliff!} \\
+\bottomrule
+\end{tabular}
+\raggedright
+
+\vspace{0.4cm}
+\textbf{Key}: Candidates are \textbf{data-driven} from profiling, not hard-coded \texttt{mod 8}.
+\begin{itemize}\setlength\itemsep{0.15em}
+\item On A100: cliffs at SDPA template boundaries, cuBLAS kernel tiers
+\item On H100: cliffs may shift (TMA 128B, FA3 templates) --- sweep is hardware specific
+\end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Constrained Optimization (3/3) --- Knapsack DP}
+
+\textbf{Step 3.} Pick one candidate per projection --- \textbf{maximize total value}:
+\[
+\max_{\{r_i\}} \sum_{i=1}^{n} \underbrace{f_i \cdot (r_i - r_i^*)}_{\text{value}_i} \quad\text{s.t.}\;\; \sum_{i} \text{params}(r_i) \leq B,\;\; r_i \in C_i
+\]
+
+\vspace{0.1cm}
+\centering\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+ & $r_i^*$ & DP picks $r_i$ & Direction & Value $= f_i \times (r_i - r_i^*)$ \\
+\midrule
+$W_1$ ($f$=10) & 121.2 & \textbf{128} & $\uparrow$ round up & $10 \times 6.8 = $ \textcolor{cgreen}{\textbf{+68}} \\
+$W_2$ ($f$=0.5) & 89.6 & \textbf{88} & $\downarrow$ round down & $0.5 \times (-1.6) = $ \textcolor{cred}{--0.8} \\
+$W_3$ ($f$=3) & 107.3 & \textbf{104} & $\downarrow$ slight down & $3 \times (-3.3) = $ \textcolor{cred}{--9.9} \\
+\bottomrule
+\end{tabular}
+\raggedright
+
+\vspace{0.3cm}
+$W_2, W_3$ round down, saving budget $\;\Rightarrow\;$ funds $W_1$'s round up.\\[0.1cm]
+\textbf{Sensitive layers preserve information; insensitive layers absorb the cost.}\\[0.2cm]
+{\footnotesize Multi-choice knapsack DP: $O(n \cdot |C| \cdot B')$, where $B'$ = quantized budget size.}
+\end{frame}
+
+
+
+% ============================================================
+\section{Preliminary Results (Not Yet)}
+% ============================================================
+
+\begin{frame}{Planned Experiment:}
+
+\textbf{Setup}: Llama-3-8B, $\rho \in [50\%, 90\%]$.
+
+\vspace{0.3cm}
+\textbf{Strategies to compare}:
+\begin{itemize}\setlength\itemsep{0.15em}
+\item \textbf{Unaligned}: PaLU default --- truncate ideal rank to integer
+\item \textbf{Round-to-32}: Independent rounding to nearest multiple of 32
+\item \textbf{GAC}: Multi-choice Knapsack + DP
+\end{itemize}
+
+\vspace{0.3cm}
+\textbf{Metrics}:
+\begin{itemize}\setlength\itemsep{0.15em}
+\item \textbf{Alignment}: Alignment rate of compressed dimensions
+\item \textbf{Accuracy}: PPL on WikiText-2 \& Zero Shot Accuracy
+\item \textbf{Latency}: E2E latency (prefill + decode)
+\end{itemize}
+
+\vspace{0.3cm}
+\textbf{Expect GAC}: 100\% alignment + faster inference  + preserving accuracy.
+\end{frame}
+
+
+% ============================================================
+\section{Our Position}
+% ============================================================
+
+\begin{frame}{Our Position}
+
+\textbf{1. Mainstream compression is hardware-agnostic.}\\[0.05cm]
+{\footnotesize SVD-LLM, FWSVD, ASVD, PaLU, GPTQ, AWQ, \ldots}\\[0.05cm]
+Targeting reducing memory, but compressed LLMs are \textbf{dimensionally collapsed}.
+
+\vspace{0.2cm}
+\textbf{2. Existing hardware-aware approaches fall short.}\\[0.05cm]
+{\footnotesize HALP [Li+ NeurIPS'22], HALOC [Xiao+ AAAI'23]}\\[0.05cm]
+Tied to specific compression/model.\\
+No guarantee on compression ratio.\\
+Does not understand the hardware root-cause.
+
+\vspace{0.2cm}
+\textbf{3. Compilers can only react, not prevent.}\\[0.05cm]
+{\footnotesize TensorRT / vLLM / TVM}\\[0.05cm]
+Pad \emph{up} to the next safe size, wasting memory. \textbf{Cannot change model architecture}.
+
+\vspace{0.2cm}
+\hrule
+\vspace{0.15cm}
+{\small $\Rightarrow$ \textbf{GAC}: A new compression paradigm that wraps any compressor, guarantees parameter budget, and prevents misalignment \textbf{at compression time} via dimension-level root-cause analysis.}
+\end{frame}
+
+
+% ============================================================
+\section{Next Steps}
+% ============================================================
+
+\begin{frame}{Next Steps}
+
+\textbf{Deadline: 3pm 25/Feb 2026, Saudi Time}
+
+\vspace{0.3cm}
 \begin{tabular}{@{}lll@{}}
 \toprule
 \textbf{Week} & \textbf{Who} & \textbf{Task} \\
 \midrule
-Feb 3--9 & Jihao & Finish paper writing \\
-Feb 10--16 & Tian & Extend experiments to H100 + update paper \\
-Feb 17--21 & -- & Buffer \\
-Feb 22--24 & Jihao & Finalize \& submit \\
+Feb 4--14 & Jihao & Finish paper writing \\
+Feb 15--21 & Tian & Extend experiments to H100 + update paper \\
+Feb 22--25 & Jihao & Finalize \& submit \\
 \bottomrule
 \end{tabular}
+\vspace{0.3cm}
 
-\vspace{0.4cm}
-\textbf{H100 experiments}:
+\textbf{The Workshop Contributions}:
 \begin{itemize}\setlength\itemsep{0.1em}
-\item FA3 template changes (drops head\_dim 96, 112)
-\item TMA 128B hard alignment verification
-\item FP8 Tensor Core alignment (m16n8k32)
-\item Kernel tier verification on Hopper cuBLAS
+\item Observe the mismatch between LLM compression and GPU hardware.
+\item Quantitative measurement and full-stack root-cause analysis.
+\item Propose a new compression paradigm: GAC.
+\item Preliminary operator-level experiments with real-LLM shapes.
 \end{itemize}
-\end{frame}
-
-% ============================================================
-\begin{frame}{}
-\centering
-\vspace{2cm}
-{\Huge\textbf{Thank You}}\\[0.5cm]
-{\large Questions?}
+\vspace{0.3cm}
+\textbf{We need H100}:
+\begin{itemize}\setlength\itemsep{0.1em}
+\item Extend current experiments for generalization.
+\item TMA 128B hard alignment --- A100's L2 miss was small (H2: 5.8\%), but TMA is a \textbf{hard constraint}.
+\item FP8 Tensor Core alignment (m16n8k32)
+\end{itemize}
 \end{frame}
 
 \end{document}

@@ -1,4 +1,4 @@
-# Paper Review: When Smaller Is Slower: Dimensional Collapse in LLM Compressions
+# Paper Review: When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
 
 **Target Venue:** EuroMLSys (SIGPLAN format, 6 pages main content, references and appendix unlimited)
 **Review Date:** 2026-01-29
@@ -570,7 +570,7 @@ Validation on H100 and newer FlashAttention versions is future work.
 ### Page-by-Page Observations
 
 **Page 1:**
-- **看到的内容**: 标题 "When Smaller Is Slower: Dimensional Collapse in LLM Compressions"，5 位作者（Jihao Xin, Tian Lvy, Qilong Pan, Kesen Wang, Marco Canini），Abstract 约 12 行，Keywords "LLM Compression, GPU Optimization, Tensor Core, Memory Alignment"
+- **看到的内容**: 标题 "When Smaller Is Slower: Dimensional Collapse in Compressed LLMs"，5 位作者（Jihao Xin, Tian Lvy, Qilong Pan, Kesen Wang, Marco Canini），Abstract 约 12 行，Keywords "LLM Compression, GPU Optimization, Tensor Core, Memory Alignment"
 - **具体观察**: Abstract 字体 10pt，清晰可读。Figure 1 位于页面底部，占约 40mm × 35mm，显示 (a) "Unconstrained SVD" 的两个直方图（Before/After），(b) "Dimension Repair" 的箭头示意图
 - **问题/建议**:
   1. Author "Tian Lvy" 可能是拼写错误（应为 "Levy"?）

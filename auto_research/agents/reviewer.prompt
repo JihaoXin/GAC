@@ -5,7 +5,7 @@
 GAC (GPU-Aligned Compression) 研究压缩 LLM 后维度不对齐导致的性能下降问题。
 目标论文：EuroMLSys (SIGPLAN 模板，双栏，6 页正文，不含引用)
 
-论文标题：When Smaller Is Slower: Dimensional Collapse in LLM Compressions
+论文标题：When Smaller Is Slower: Dimensional Collapse in Compressed LLMs
 
 ## 重要提示
 

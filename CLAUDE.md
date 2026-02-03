@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **GAC (GPU-Aligned Compression)** is a research project studying dimensional collapse in compressed LLMs - the phenomenon where post-training compression produces irregular tensor dimensions that cause significant GPU performance degradation despite reducing FLOPs.
 
-Paper title: "When Smaller Is Slower: Dimensional Collapse in LLM Compressions"
+Paper title: "When Smaller Is Slower: Dimensional Collapse in Compressed LLMs"
 Target venue: EuroMLSys (SIGPLAN format, 6 pages main content, references and appendix unlimited)
 
 ## Common Commands
