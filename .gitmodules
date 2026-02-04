@@ -1,3 +1,6 @@
 [submodule "third_party/RAP"]
 	path = third_party/RAP
 	url = /home/xinj/rap
+[submodule "ARK"]
+	path = ARK
+	url = git@github.com:JihaoXin/ARK.git
