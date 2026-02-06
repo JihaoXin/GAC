@@ -1,24 +1,24 @@
 #!/bin/bash
-#SBATCH --job-name=svdllm_lat
-#SBATCH --output=slurm_logs/svdllm_lat_%j.out
-#SBATCH --error=slurm_logs/svdllm_lat_%j.err
+#SBATCH --job-name=triton_gemv
+#SBATCH --output=slurm_logs/triton_gemv_%j.out
+#SBATCH --error=slurm_logs/triton_gemv_%j.err
 #SBATCH --gres=gpu:a100:1
 #SBATCH --constraint=gpu_a100_80gb
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=150GB
-#SBATCH --time=06:00:00
+#SBATCH --mem=64GB
+#SBATCH --time=02:00:00
 #SBATCH --qos=spot
 
 set -eo pipefail
 mkdir -p slurm_logs
 
 source ~/.bashrc
-mamba activate svdllm
+mamba activate llama
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 cd $SLURM_SUBMIT_DIR
 
 echo "============================================="
-echo "SVD-LLM Latency Benchmark"
+echo "Triton GeMV Alignment Benchmark"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURMD_NODENAME"
 echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
@@ -29,21 +29,20 @@ echo ""
 nvidia-smi
 echo ""
 
-python scripts/svdllm_latency_bench.py \
-    --ratio 0.7 \
-    --output results/svdllm_llama3_latency_v2 \
-    --device cuda \
-    --profiling-path results/svdllm_llama3/profiling_mat.pt \
-    --gemm-warmup 100 \
-    --gemm-repeats 500 \
-    --prefill-warmup 5 \
-    --prefill-repeats 30 \
-    --seq-lens 128,256,512,1024 \
-    --batch-tokens 512 \
-    --decode-prompt-len 128 \
-    --decode-gen-tokens 64 \
-    --decode-warmup 3 \
-    --decode-repeats 10 \
+# Check Triton installation
+python -c "import triton; print(f'Triton version: {triton.__version__}')" 2>&1 || echo "Warning: Triton not available"
+
+echo ""
+echo "Running Triton GeMV benchmark..."
+echo ""
+
+python scripts/triton_gemv_bench.py \
+    --output results/triton_gemv \
+    --warmup 50 \
+    --repeats 200 \
+    --block-n 64 \
+    --block-k 64 \
+    --experiments all \
     2>&1
 
 echo ""

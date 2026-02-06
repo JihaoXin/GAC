@@ -395,47 +395,153 @@ All four methods produce \textbf{50--80\% misaligned} dimensions $\Rightarrow$ s
 \end{frame}
 
 % ------------------------------------------------------------
-\begin{frame}{Hardware Layer: Why Misalignment Hurts (Working)}
+\begin{frame}{Hardware Layer: GPU Memory Hierarchy}
 \vspace{-0.1cm}
 
-\begin{itemize}\setlength\itemsep{6pt}
-\item \textbf{Tensor Core} --- \texttt{mma.m16n8k16}.\\
-  Misaligned forces fallback from \texttt{HMMA} to \texttt{FFMA} (scalar FP math).
+\begin{center}
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners=3pt, minimum width=4.5cm, minimum height=0.9cm,
+                line width=0.6pt, font=\sffamily\small, align=center},
+    arr/.style={->, line width=1.2pt, gray!70},
+    >=stealth
+  ]
+  % HBM
+  \node[box, fill=cred!12] (hbm) at (0,0) {\textbf{HBM (Global Memory)}\\{\scriptsize 80GB, 2TB/s peak}};
 
-\item \textbf{Vectorized Loads} --- \texttt{LDG.128} requires $\text{dim} \bmod 8 = 0$\\
-  Misaligned dim falls back to scalar \texttt{LDG.32}, 4$\times$ fewer bytes per instruction.
+  % L2 Cache
+  \node[box, fill=corange!12] (l2) at (0,1.6) {\textbf{L2 Cache}\\{\scriptsize 40MB, 32-byte sectors}};
 
-\item \textbf{L2 Cache Sectors} --- 32-byte fetch granularity\\
-  Non-aligned row stride wastes partial sectors, but GEMM tiling largely masks this.
-\end{itemize}
+  % L1 / Shared
+  \node[box, fill=cblue!12] (l1) at (0,3.2) {\textbf{L1 / Shared Memory}\\{\scriptsize 192KB per SM}};
 
-\vspace{0.3cm}
-\textbf{Takeaway}: The first two mechanisms explain \emph{why} cuBLAS kernel tiers and SDPA backend fallbacks exist at the library/framework level.
+  % Registers
+  \node[box, fill=cgreen!12] (reg) at (0,4.8) {\textbf{Registers}\\{\scriptsize 256KB per SM}};
+
+  % Arrows
+  \draw[arr] (hbm) -- (l2) node[midway, right=0.2cm, font=\scriptsize] {32-byte sectors};
+  \draw[arr] (l2) -- (l1);
+  \draw[arr] (l1) -- (reg);
+
+  % L2 sector explanation
+  \node[draw, rounded corners=3pt, fill=yellow!8, line width=0.6pt,
+        font=\sffamily\small, align=left, text width=5.5cm] (ldg) at (6.5,1.6) {
+    \textbf{L2 Cache Sectors}:\\[2pt]
+    \textbf{Sector size}: 32 bytes\\
+    \quad = 16 fp16 elements\\[2pt]
+    \textbf{Alignment requirement}:\\
+    \quad dim \% 16 = 0 for fp16\\[2pt]
+    Misaligned $\Rightarrow$ partial sectors
+  };
+  \draw[->, line width=1pt, dashed, gray] (l2.east) -- (ldg.west);
+
+\end{tikzpicture}
+\end{center}
+
+\vspace{0.1cm}
+\small
+\textbf{Key Insight}: Decoding is Memory-bound operation (e.g.~GeMV)\\
+Misalignment causes \textbf{partial L2 cache sector} reads with wasted bandwidth.
 \end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Hardware Layer: L2 Cache Sector Alignment}
+\vspace{-0.3cm}
+\begin{center}
+\includegraphics[width=0.85\textwidth]{figures/fig_l2_alignment.pdf}
+\end{center}
+\vspace{-0.2cm}
+\small
+\textbf{Key Finding}: K \% 16 = 0 required (L2 sector = 32 bytes = 16 fp16).\\
+{\footnotesize L2 sector count identical ($\sim$262k), but aligned achieves \textbf{2$\times$ throughput} via memory coalescing.}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Hardware Layer: Tensor Core MMA Alignment}
+\vspace{-0.3cm}
+\begin{center}
+\includegraphics[width=0.85\textwidth]{figures/fig_tc_k_alignment.pdf}
+\end{center}
+\vspace{-0.2cm}
+\small
+\textbf{Key Finding}: K \% 16 = 0 required for Tensor Core \texttt{mma.m16n8k16} instruction.\\
+{\footnotesize Misalignment causes \textbf{50\% TFLOPS loss}. N \% 8 = 0 also required (similar penalty).}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Hardware Layer: Library Heuristics vs Pure Hardware}
+\vspace{-0.2cm}
+\small
+\textbf{Experiment}: Compare Triton (pure hardware) vs cuBLAS (library heuristics) for GeMV.
+
+\vspace{0.15cm}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\centering
+\textbf{Triton GeMV (pure hardware)}\\[0.1cm]
+{\scriptsize Custom kernel, no library optimization}\\[0.1cm]
+\begin{tabular}{@{}lcc@{}}
+\toprule
+K dim & Latency & Penalty \\
+\midrule
+\rowcolor{cgreen!10} 4096 (aligned) & 0.106 ms & --- \\
+\rowcolor{cred!10} 4095 (K misalign) & 0.209 ms & \textcolor{cred}{\textbf{+98\%}} \\
+\rowcolor{corange!10} 1023 (N misalign) & 0.106 ms & +0.2\% \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.2cm}
+{\footnotesize \textbf{K misalignment}: +98\% penalty\\
+(L2 sector misalignment)}
+\end{column}
+\begin{column}{0.48\textwidth}
+\centering
+\textbf{cuBLAS GeMV (library heuristics)}\\[0.1cm]
+{\scriptsize Kernel selection masks HW effect}\\[0.1cm]
+\begin{tabular}{@{}lcc@{}}
+\toprule
+K dim & Latency & Penalty \\
+\midrule
+\rowcolor{cgreen!10} 4096 (aligned) & 0.030 ms & --- \\
+\rowcolor{corange!10} 4095 (K misalign) & 0.031 ms & \textcolor{corange}{\textbf{+2\%}} \\
+\rowcolor{cgreen!10} 1023 (N misalign) & 0.030 ms & $\sim$0\% \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.2cm}
+{\footnotesize \textbf{cuBLAS heuristics}: Only +2\% penalty\\
+(Internal padding / optimized access pattern)}
+\end{column}
+\end{columns}
+
+\vspace{0.25cm}
+\textbf{Key Finding}: cuBLAS uses \textbf{internal padding} or optimized kernels to mask L2 penalty.\\
+\end{frame}
+
 
 % ------------------------------------------------------------
 \begin{frame}{Constraint Summary}
 \begin{table}
 \centering
 \small
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}llll@{}}
 \toprule
-\textbf{Layer} & \textbf{Finding} & \textbf{Constraint} \\
+\textbf{Layer} & \textbf{Finding} & \textbf{Constraint} & \
+textbf{Penalty} \\
 \midrule
-\rowcolor{cblue!8} Framework & SDPA backend selection & $d \bmod 8 = 0$ \\
-\rowcolor{cblue!8} Framework & FA2 template alignment & $d \bmod 32 = 0$ \\
+\rowcolor{cblue!8} Framework & SDPA backend & $d \bmod 8 = 0$ & $\sim$200\% \\
+\rowcolor{cblue!8} Framework & FA2 template & $d \bmod 32 = 0$ & $\sim$50\% \\
 \midrule
-\rowcolor{corange!8} Library & cuBLAS kernel tier & $K$/$N$ $\bmod$ 8 = 0 \\
-\rowcolor{corange!8} Library & Kernel cliff & heuristics of sweet spot \\
+\rowcolor{corange!8} Library & cuBLAS GEMM tier & $K$/$N$ $\bmod$ 8 = 0 & $\sim$163\% \\
+\rowcolor{corange!8} Library & cuBLAS GeMV & (masked by heuristics) & $\sim$14\% \\
 \midrule
-\rowcolor{cred!8} Hardware & Tensor Core & $m16n8k16$ \\
-\rowcolor{cred!8} Hardware & Vectorized loads & dim $\bmod$ 8 = 0 \\
-\rowcolor{cred!8} Hardware & L2 cache sector & dim $\bmod$ 16 = 0 \\
+\rowcolor{cred!8} Hardware & L2 sector align & $K \bmod 16 = 0$ & $\sim$57\% \\
+\rowcolor{cred!8} Hardware & Tensor Core MMA & $K \bmod 16$, $N \bmod 8$ & $\sim$50\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\vspace{0.3cm}
+\vspace{0.2cm}
+
 \end{frame}
 
 
@@ -561,32 +667,68 @@ $W_2, W_3$ round down, saving budget $\;\Rightarrow\;$ funds $W_1$'s round up.\\
 
 
 % ============================================================
-\section{Preliminary Results (Not Yet)}
+\section{Experimental Results}
 % ============================================================
 
-\begin{frame}{Planned Experiment:}
+% ------------------------------------------------------------
+\begin{frame}{Experiment Setup}
 
-\textbf{Setup}: Llama-3-8B, $\rho \in [50\%, 90\%]$.
+\textbf{Model}: Llama-3-8B \quad\textbf{Dataset}: WikiText-2 \quad\textbf{Hardware}: NVIDIA A100 80GB
+
+\vspace{0.3cm}
+\textbf{Compression Methods}:
+\begin{itemize}\setlength\itemsep{0.15em}
+\item \textbf{ASVD}: Activation-aware SVD factorization, 15\% compression (Attn+MLP)
+\item \textbf{LLM-Pruner}: Structured MLP pruning, 15\% sparsity (Only MLP)
+\end{itemize}
 
 \vspace{0.3cm}
 \textbf{Strategies to compare}:
 \begin{itemize}\setlength\itemsep{0.15em}
-\item \textbf{Unaligned}: PaLU default --- truncate ideal rank to integer
-\item \textbf{Round-to-32}: Independent rounding to nearest multiple of 32
-\item \textbf{GAC}: Multi-choice Knapsack + DP
+\item \textbf{Baseline}: Original uncompressed model
+\item \textbf{Unaligned}: Default compression output (irregular dimensions)
+\item \textbf{GAC}: GAC with dimension alignment to multiples of 8
 \end{itemize}
 
 \vspace{0.3cm}
-\textbf{Metrics}:
-\begin{itemize}\setlength\itemsep{0.15em}
-\item \textbf{Alignment}: Alignment rate of compressed dimensions
-\item \textbf{Accuracy}: PPL on WikiText-2 \& Zero Shot Accuracy
-\item \textbf{Latency}: E2E latency (prefill + decode)
-\end{itemize}
-
-\vspace{0.3cm}
-\textbf{Expect GAC}: 100\% alignment + faster inference  + preserving accuracy.
+\textbf{Metrics}: Alignment, Accuracy, Latency
 \end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Comprehensive Results}
+\vspace{-0.2cm}
+\small
+\textbf{Model}: Llama-3-8B \quad\textbf{Compression}: 15\% \quad\textbf{Hardware}: NVIDIA A100 80GB
+
+\vspace{0.3cm}
+\begin{table}
+\centering
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Method} & \textbf{Align\%} & \textbf{PPL}$\downarrow$ & \textbf{Acc} & \textbf{Prefill} & \textbf{Decode} \\
+\midrule
+\rowcolor{gray!10} Baseline & 100\% & 6.14 & 0.72 & 99.6 ms & 25.1 ms \\
+\midrule
+ASVD(Unaligned) & 5\% & 34.7 & 0.38 & 100.5 \textcolor{cred}{(+1\%)} & 28.6 \textcolor{cred}{(+14\%)} \\
+ASVD(GAC) & 100\% & 31.3 & 0.39 & 67.1 \textcolor{cgreen}{(--33\%)} & 29.5 \textcolor{cred}{(+18\%)} \\
+\midrule
+LLM-Pruner(Unaligned) & 83\% & 9.88 & 0.67 & 137.7 \textcolor{cred}{(+38\%)} & 24.2 \textcolor{cgreen}{(--2\%)} \\
+LLM-Pruner(GAC) & 100\% & 9.87 & 0.67 & 88.0 \textcolor{cgreen}{(--12\%)} & 24.3 \textcolor{cgreen}{(--2\%)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.3cm}
+\textbf{Key Observations}:
+\begin{itemize}\setlength\itemsep{0.1em}
+\item ASVD: 5\% aligned $\Rightarrow$ GAC recovers \textbf{--33\%} prefill (1.5$\times$ speedup)
+\item LLM-Pruner: 83\% aligned but \textbf{+38\%} prefill penalty; GAC $\Rightarrow$ \textbf{--12\%} faster than baseline
+\item Decode (GEMV): cuBLAS masks misalignment $\Rightarrow$ minimal difference
+\item Prefill (GEMM): Alignment critical $\Rightarrow$ 1.5$\times$ speedup from GAC
+\end{itemize}
+\end{frame}
+
 
 
 % ============================================================

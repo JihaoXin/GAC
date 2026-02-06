@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=llmprune_l3
-#SBATCH --output=slurm_logs/llmprune_l3_%j.out
-#SBATCH --error=slurm_logs/llmprune_l3_%j.err
+#SBATCH --job-name=llmprune_r16
+#SBATCH --output=slurm_logs/llmprune_r16_%j.out
+#SBATCH --error=slurm_logs/llmprune_r16_%j.err
 #SBATCH --gres=gpu:a100:1
 #SBATCH --constraint=gpu_a100_80gb
 #SBATCH --cpus-per-task=8
@@ -19,24 +19,21 @@ export HF_DATASETS_TRUST_REMOTE_CODE=1
 cd $SLURM_SUBMIT_DIR
 
 echo "============================================="
-echo "LLM-Pruner + GAC on Llama-3-8B"
+echo "LLM-Pruner + GAC: round_to=8 vs round_to=16"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURMD_NODENAME"
 echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
 echo "Date: $(date)"
-echo "Python: $($PYTHON --version)"
-echo "Transformers: $($PYTHON -c 'import transformers; print(transformers.__version__)')"
 echo "============================================="
 echo ""
 nvidia-smi
 echo ""
 
-# Run LLM-Pruner experiment on Llama-3-8B
-# Strategies: baseline, pruned (no rounding), pruned_r8 (round_to=8)
-# Pruning ratio: 0.25 (remove 25% channels)
+# Run LLM-Pruner experiment with all 4 strategies:
+# baseline, pruned (no rounding), pruned_r8, pruned_r16
 $PYTHON scripts/llmpruner_gac_experiment.py \
     --pruning-ratio 0.25 \
-    --output results/llmpruner_llama3_v2 \
+    --output results/llmpruner_llama3_r16 \
     --device cuda \
     --eval-accuracy \
     --accuracy-tasks piqa,hellaswag \
@@ -53,5 +50,5 @@ $PYTHON scripts/llmpruner_gac_experiment.py \
 
 echo ""
 echo "============================================="
-echo "LLM-Pruner Experiment Complete: $(date)"
+echo "LLM-Pruner r16 Experiment Complete: $(date)"
 echo "============================================="

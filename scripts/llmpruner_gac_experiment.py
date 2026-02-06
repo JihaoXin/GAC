@@ -4,17 +4,19 @@ LLM-Pruner + GAC Alignment Experiment on Llama-3-8B.
 Demonstrates dimensional collapse from structured pruning:
   1. Global pruning produces non-uniform MLP widths per layer
   2. Without alignment, MLP dimensions can be non-multiples-of-8
-  3. round_to=8 restores GPU alignment with minimal quality loss
+  3. round_to=8 restores Tensor Core alignment
+  4. round_to=16 additionally aligns to L2 cache sectors (32 bytes = 16 fp16)
 
 Strategies:
   - baseline: unpruned Llama-3-8B
   - pruned: block-wise global Taylor pruning (no rounding)
   - pruned_r8: same pruning with round_to=8
+  - pruned_r16: same pruning with round_to=16 (L2 sector aligned)
 
 Metrics: alignment%, PPL (WikiText-2), accuracy (piqa, hellaswag), prefill latency.
 
 Usage (via Slurm):
-    sbatch slurm/run_llmpruner_experiment.sbatch
+    sbatch slurm/run_llmpruner_llama3.sbatch
 """
 
 import os
@@ -190,15 +192,17 @@ def analyze_dimensions(model):
         layer_dims.append(info)
 
     n_total = len(all_dims)
-    n_aligned = sum(1 for d in all_dims if d % 8 == 0)
-    pct_aligned = 100.0 * n_aligned / n_total if n_total > 0 else 0
+    n_aligned_8 = sum(1 for d in all_dims if d % 8 == 0)
+    n_aligned_16 = sum(1 for d in all_dims if d % 16 == 0)
+    pct_aligned_8 = 100.0 * n_aligned_8 / n_total if n_total > 0 else 0
+    pct_aligned_16 = 100.0 * n_aligned_16 / n_total if n_total > 0 else 0
 
     # Unique MLP intermediate sizes (most likely source of misalignment)
     mlp_sizes = set()
     for info in layer_dims:
         mlp_sizes.add(info["gate_proj_out"])
 
-    return layer_dims, pct_aligned, n_aligned, n_total, sorted(mlp_sizes)
+    return layer_dims, pct_aligned_8, pct_aligned_16, n_aligned_8, n_aligned_16, n_total, sorted(mlp_sizes)
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +377,72 @@ def bench_prefill_latency(model, tokenizer, dev, seq_lens=[128, 256, 512, 1024],
     return results
 
 
+def bench_decode_latency(model, tokenizer, dev, prompt_len=128, gen_tokens=64,
+                         warmup=3, repeats=10):
+    """
+    Measure decode latency: time to generate `gen_tokens` after prefill.
+    Reports per-token decode latency.
+    """
+    model.to(dev)
+    model.eval()
+
+    input_ids = torch.randint(0, tokenizer.vocab_size, (1, prompt_len), device=dev)
+
+    # Warmup
+    for _ in range(warmup):
+        with torch.no_grad():
+            _ = model.generate(
+                input_ids,
+                max_new_tokens=gen_tokens,
+                do_sample=False,
+                use_cache=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+    torch.cuda.synchronize(dev)
+
+    # Measure total generation time
+    times = []
+    for _ in range(repeats):
+        torch.cuda.synchronize(dev)
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+
+        with torch.no_grad():
+            _ = model.generate(
+                input_ids,
+                max_new_tokens=gen_tokens,
+                do_sample=False,
+                use_cache=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+
+        end.record()
+        torch.cuda.synchronize(dev)
+        times.append(start.elapsed_time(end))
+
+    arr = np.array(times)
+    total_ms = float(np.mean(arr))
+    per_token_ms = total_ms / gen_tokens
+
+    result = {
+        "prompt_len": prompt_len,
+        "gen_tokens": gen_tokens,
+        "total_mean_ms": total_ms,
+        "total_std_ms": float(np.std(arr)),
+        "per_token_ms": per_token_ms,
+        "tokens_per_sec": 1000.0 / per_token_ms,
+        "count": len(times),
+    }
+
+    print(f"    prompt={prompt_len}, gen={gen_tokens}: {total_ms:.2f}ms total, "
+          f"{per_token_ms:.2f}ms/tok ({result['tokens_per_sec']:.1f} tok/s)")
+
+    model.cpu()
+    torch.cuda.empty_cache()
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
@@ -384,7 +454,8 @@ def generate_plots(results, dim_data, output_dir):
     plot_dir = output_dir / "plots"
     plot_dir.mkdir(exist_ok=True)
     colors = {
-        "baseline": "#95a5a6", "pruned": "#e74c3c", "pruned_r8": "#3498db"
+        "baseline": "#95a5a6", "pruned": "#e74c3c",
+        "pruned_r8": "#3498db", "pruned_r16": "#2ecc71",
     }
 
     # --- PPL comparison ---
@@ -485,6 +556,10 @@ def main():
     parser.add_argument("--seq-lens", type=str, default="128,256,512,1024")
     parser.add_argument("--prefill-warmup", type=int, default=5)
     parser.add_argument("--prefill-repeats", type=int, default=30)
+    parser.add_argument("--decode-prompt-len", type=int, default=128)
+    parser.add_argument("--decode-gen-tokens", type=int, default=64)
+    parser.add_argument("--decode-warmup", type=int, default=3)
+    parser.add_argument("--decode-repeats", type=int, default=10)
     args = parser.parse_args()
 
     out_dir = Path(args.output)
@@ -510,9 +585,10 @@ def main():
     model.eval()
 
     # Dimension analysis for baseline
-    dims_bl, pct_bl, na_bl, nt_bl, mlp_sizes_bl = analyze_dimensions(model)
+    dims_bl, pct8_bl, pct16_bl, na8_bl, na16_bl, nt_bl, mlp_sizes_bl = analyze_dimensions(model)
     dim_data["baseline"] = dims_bl
-    print(f"  Alignment: {na_bl}/{nt_bl} ({pct_bl:.1f}%)")
+    print(f"  Alignment mod8: {na8_bl}/{nt_bl} ({pct8_bl:.1f}%)")
+    print(f"  Alignment mod16: {na16_bl}/{nt_bl} ({pct16_bl:.1f}%)")
     print(f"  MLP sizes: {mlp_sizes_bl}")
 
     # PPL
@@ -524,7 +600,8 @@ def main():
     result_bl = {
         "strategy": "baseline",
         "ppl": baseline_ppl,
-        "pct_aligned": pct_bl,
+        "pct_aligned": pct8_bl,
+        "pct_aligned_16": pct16_bl,
         "n_params": sum(p.numel() for p in model.parameters()),
     }
 
@@ -541,6 +618,12 @@ def main():
                                      args.prefill_warmup, args.prefill_repeats)
         result_bl["prefill_latency"] = lat
 
+        print("  Decode latency (baseline):")
+        dec = bench_decode_latency(model, tokenizer, dev,
+                                    args.decode_prompt_len, args.decode_gen_tokens,
+                                    args.decode_warmup, args.decode_repeats)
+        result_bl["decode_latency"] = dec
+
     all_results.append(result_bl)
     del model
     gc.collect()
@@ -553,9 +636,10 @@ def main():
     model, tokenizer = load_model()
     model = prune_model(model, tokenizer, args.pruning_ratio, dev, round_to=None)
 
-    dims_p, pct_p, na_p, nt_p, mlp_sizes_p = analyze_dimensions(model)
+    dims_p, pct8_p, pct16_p, na8_p, na16_p, nt_p, mlp_sizes_p = analyze_dimensions(model)
     dim_data["pruned"] = dims_p
-    print(f"  Alignment: {na_p}/{nt_p} ({pct_p:.1f}%)")
+    print(f"  Alignment mod8: {na8_p}/{nt_p} ({pct8_p:.1f}%)")
+    print(f"  Alignment mod16: {na16_p}/{nt_p} ({pct16_p:.1f}%)")
     print(f"  Unique MLP sizes: {mlp_sizes_p}")
     n_params_p = sum(p.numel() for p in model.parameters())
 
@@ -568,7 +652,8 @@ def main():
     result_p = {
         "strategy": "pruned",
         "ppl": ppl_p,
-        "pct_aligned": pct_p,
+        "pct_aligned": pct8_p,
+        "pct_aligned_16": pct16_p,
         "n_params": n_params_p,
         "mlp_sizes": mlp_sizes_p,
     }
@@ -586,6 +671,12 @@ def main():
                                      args.prefill_warmup, args.prefill_repeats)
         result_p["prefill_latency"] = lat
 
+        print("  Decode latency (pruned):")
+        dec = bench_decode_latency(model, tokenizer, dev,
+                                    args.decode_prompt_len, args.decode_gen_tokens,
+                                    args.decode_warmup, args.decode_repeats)
+        result_p["decode_latency"] = dec
+
     all_results.append(result_p)
     del model
     gc.collect()
@@ -598,9 +689,10 @@ def main():
     model, tokenizer = load_model()
     model = prune_model(model, tokenizer, args.pruning_ratio, dev, round_to=8)
 
-    dims_r8, pct_r8, na_r8, nt_r8, mlp_sizes_r8 = analyze_dimensions(model)
+    dims_r8, pct8_r8, pct16_r8, na8_r8, na16_r8, nt_r8, mlp_sizes_r8 = analyze_dimensions(model)
     dim_data["pruned_r8"] = dims_r8
-    print(f"  Alignment: {na_r8}/{nt_r8} ({pct_r8:.1f}%)")
+    print(f"  Alignment mod8: {na8_r8}/{nt_r8} ({pct8_r8:.1f}%)")
+    print(f"  Alignment mod16: {na16_r8}/{nt_r8} ({pct16_r8:.1f}%)")
     print(f"  Unique MLP sizes: {mlp_sizes_r8}")
     n_params_r8 = sum(p.numel() for p in model.parameters())
 
@@ -613,7 +705,8 @@ def main():
     result_r8 = {
         "strategy": "pruned_r8",
         "ppl": ppl_r8,
-        "pct_aligned": pct_r8,
+        "pct_aligned": pct8_r8,
+        "pct_aligned_16": pct16_r8,
         "n_params": n_params_r8,
         "mlp_sizes": mlp_sizes_r8,
     }
@@ -631,7 +724,66 @@ def main():
                                      args.prefill_warmup, args.prefill_repeats)
         result_r8["prefill_latency"] = lat
 
+        print("  Decode latency (pruned_r8):")
+        dec = bench_decode_latency(model, tokenizer, dev,
+                                    args.decode_prompt_len, args.decode_gen_tokens,
+                                    args.decode_warmup, args.decode_repeats)
+        result_r8["decode_latency"] = dec
+
     all_results.append(result_r8)
+    del model
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    # ---------------------------------------------------------------
+    # Step 4: Pruned with round_to=16 (L2 sector alignment)
+    # ---------------------------------------------------------------
+    print("\n[Step 4] Pruning WITH round_to=16 (L2 sector aligned)...")
+    model, tokenizer = load_model()
+    model = prune_model(model, tokenizer, args.pruning_ratio, dev, round_to=16)
+
+    dims_r16, pct8_r16, pct16_r16, na8_r16, na16_r16, nt_r16, mlp_sizes_r16 = analyze_dimensions(model)
+    dim_data["pruned_r16"] = dims_r16
+    print(f"  Alignment mod8: {na8_r16}/{nt_r16} ({pct8_r16:.1f}%)")
+    print(f"  Alignment mod16: {na16_r16}/{nt_r16} ({pct16_r16:.1f}%)")
+    print(f"  Unique MLP sizes: {mlp_sizes_r16}")
+    n_params_r16 = sum(p.numel() for p in model.parameters())
+
+    # PPL
+    model = model.float()
+    t0 = time.time()
+    ppl_r16 = eval_ppl(model, tokenizer, dev)
+    print(f"  PPL: {ppl_r16:.2f} ({time.time()-t0:.0f}s)")
+
+    result_r16 = {
+        "strategy": "pruned_r16",
+        "ppl": ppl_r16,
+        "pct_aligned": pct8_r16,
+        "pct_aligned_16": pct16_r16,
+        "n_params": n_params_r16,
+        "mlp_sizes": mlp_sizes_r16,
+    }
+
+    if args.eval_accuracy:
+        model = model.half()
+        accs = eval_accuracy(model, tokenizer, dev,
+                              args.accuracy_tasks, args.accuracy_limit)
+        result_r16["accuracy"] = accs
+
+    if args.eval_latency:
+        model = model.half()
+        print("  Prefill latency (pruned_r16):")
+        lat = bench_prefill_latency(model, tokenizer, dev, seq_lens,
+                                     args.prefill_warmup, args.prefill_repeats)
+        result_r16["prefill_latency"] = lat
+
+        print("  Decode latency (pruned_r16):")
+        dec = bench_decode_latency(model, tokenizer, dev,
+                                    args.decode_prompt_len, args.decode_gen_tokens,
+                                    args.decode_warmup, args.decode_repeats)
+        result_r16["decode_latency"] = dec
+
+    all_results.append(result_r16)
     del model
     gc.collect()
     torch.cuda.empty_cache()
@@ -642,13 +794,14 @@ def main():
     print("\n" + "=" * 70)
     print("RESULTS SUMMARY")
     print("=" * 70)
-    header = f"{'Strategy':<14} {'PPL':>8} {'Aligned%':>9} {'#Params':>14}"
+    header = f"{'Strategy':<14} {'PPL':>8} {'Mod8%':>7} {'Mod16%':>7} {'#Params':>14}"
     if args.eval_accuracy:
         header += f"  {'Avg Acc':>8}"
     print(header)
     print("-" * len(header))
     for r in all_results:
-        line = (f"{r['strategy']:<14} {r['ppl']:>8.2f} {r['pct_aligned']:>8.1f}% "
+        line = (f"{r['strategy']:<14} {r['ppl']:>8.2f} {r['pct_aligned']:>6.1f}% "
+                f"{r.get('pct_aligned_16', 0):>6.1f}% "
                 f"{r.get('n_params', 0):>14,}")
         if args.eval_accuracy:
             accs = r.get("accuracy", {})
@@ -672,6 +825,15 @@ def main():
                 ms = entry["mean_ms"] if isinstance(entry, dict) else 0
                 print(f"  {ms:>9.2f}ms", end="")
             print()
+
+        print(f"\nDECODE LATENCY (prompt={args.decode_prompt_len}, gen={args.decode_gen_tokens})")
+        print(f"{'Strategy':<14}  {'Total':>10}  {'Per-Token':>10}  {'Tok/s':>8}")
+        for r in all_results:
+            dec = r.get("decode_latency", {})
+            if not dec:
+                continue
+            print(f"{r['strategy']:<14}  {dec['total_mean_ms']:>9.2f}ms  "
+                  f"{dec['per_token_ms']:>9.2f}ms  {dec['tokens_per_sec']:>8.1f}")
 
     # Save
     with open(out_dir / "results.json", "w") as f:

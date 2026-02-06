@@ -197,6 +197,75 @@ def bench_prefill_latency(model, tokenizer, dev, seq_lens=[128, 256, 512],
 
 
 # ---------------------------------------------------------------------------
+# Part 4: Decode latency (token-by-token generation)
+# ---------------------------------------------------------------------------
+def bench_decode_latency(model, tokenizer, dev, prompt_len=128, gen_tokens=64,
+                         warmup=3, repeats=10):
+    """
+    Measure decode latency: time to generate `gen_tokens` after prefill.
+    Reports per-token decode latency.
+    """
+    model.to(dev)
+    model.eval()
+
+    input_ids = torch.randint(0, tokenizer.vocab_size, (1, prompt_len), device=dev)
+
+    # Warmup
+    for _ in range(warmup):
+        with torch.no_grad():
+            _ = model.generate(
+                input_ids,
+                max_new_tokens=gen_tokens,
+                do_sample=False,
+                use_cache=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+    torch.cuda.synchronize(dev)
+
+    # Measure total generation time
+    times = []
+    for _ in range(repeats):
+        torch.cuda.synchronize(dev)
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+
+        with torch.no_grad():
+            _ = model.generate(
+                input_ids,
+                max_new_tokens=gen_tokens,
+                do_sample=False,
+                use_cache=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+
+        end.record()
+        torch.cuda.synchronize(dev)
+        times.append(start.elapsed_time(end))
+
+    arr = np.array(times)
+    total_ms = float(np.mean(arr))
+    per_token_ms = total_ms / gen_tokens
+
+    result = {
+        "prompt_len": prompt_len,
+        "gen_tokens": gen_tokens,
+        "total_mean_ms": total_ms,
+        "total_std_ms": float(np.std(arr)),
+        "per_token_ms": per_token_ms,
+        "tokens_per_sec": 1000.0 / per_token_ms,
+        "count": len(times),
+    }
+
+    print(f"    prompt={prompt_len}, gen={gen_tokens}: {total_ms:.2f}ms total, "
+          f"{per_token_ms:.2f}ms/tok ({result['tokens_per_sec']:.1f} tok/s)")
+
+    model.cpu()
+    torch.cuda.empty_cache()
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
 def generate_latency_plots(gemm_results, prefill_results, output_dir):
@@ -311,6 +380,12 @@ def main():
     parser.add_argument("--seq-lens", type=str, default="128,256,512,1024")
     parser.add_argument("--batch-tokens", type=int, default=512,
                         help="Batch size (tokens) for GEMM microbenchmark")
+    parser.add_argument("--decode-prompt-len", type=int, default=128,
+                        help="Prompt length for decode benchmark")
+    parser.add_argument("--decode-gen-tokens", type=int, default=64,
+                        help="Number of tokens to generate for decode benchmark")
+    parser.add_argument("--decode-warmup", type=int, default=3)
+    parser.add_argument("--decode-repeats", type=int, default=10)
     args = parser.parse_args()
 
     out_dir = Path(args.output)
@@ -420,7 +495,52 @@ def main():
         json.dump(prefill_results, f, indent=2, default=str)
 
     # ---------------------------------------------------------------
-    # Step 4: Summary
+    # Step 4: Decode latency (token generation)
+    # ---------------------------------------------------------------
+    print("\n[Step 4] Decode latency (token generation)...")
+    print(f"  prompt_len={args.decode_prompt_len}, gen_tokens={args.decode_gen_tokens}")
+
+    decode_results = {}
+
+    # Baseline
+    print("\n  Strategy: baseline (uncompressed)")
+    m_base, _ = load_model(MODEL_ID)
+    m_base.eval().half()
+    decode_results["baseline"] = bench_decode_latency(
+        m_base, tokenizer, dev,
+        prompt_len=args.decode_prompt_len,
+        gen_tokens=args.decode_gen_tokens,
+        warmup=args.decode_warmup,
+        repeats=args.decode_repeats,
+    )
+    del m_base
+    torch.cuda.empty_cache()
+
+    if profiling_mat is not None:
+        for strat_name, ranks in strategies.items():
+            print(f"\n  Strategy: {strat_name}")
+
+            m, _ = load_model(MODEL_ID)
+            m.eval()
+            whitened_svd_compress(m, profiling_mat, ranks, dev)
+            m = m.half()
+
+            decode_results[strat_name] = bench_decode_latency(
+                m, tokenizer, dev,
+                prompt_len=args.decode_prompt_len,
+                gen_tokens=args.decode_gen_tokens,
+                warmup=args.decode_warmup,
+                repeats=args.decode_repeats,
+            )
+
+            del m
+            torch.cuda.empty_cache()
+
+    with open(out_dir / "decode_results.json", "w") as f:
+        json.dump(decode_results, f, indent=2, default=str)
+
+    # ---------------------------------------------------------------
+    # Step 5: Summary
     # ---------------------------------------------------------------
     print("\n" + "=" * 70)
     print("GEMM LATENCY SUMMARY (factorized V+U, batch=512)")
@@ -462,10 +582,18 @@ def main():
                     print(f"  {pct:>+9.2f}%", end="")
                 print()
 
+    # Decode latency summary
+    if decode_results:
+        print(f"\nDECODE LATENCY (prompt={args.decode_prompt_len}, gen={args.decode_gen_tokens})")
+        print(f"{'Strategy':<12}  {'Total':>10}  {'Per-Token':>10}  {'Tok/s':>8}")
+        for strat_name, res in decode_results.items():
+            print(f"{strat_name:<12}  {res['total_mean_ms']:>9.2f}ms  "
+                  f"{res['per_token_ms']:>9.2f}ms  {res['tokens_per_sec']:>8.1f}")
+
     # ---------------------------------------------------------------
-    # Step 5: Plots
+    # Step 6: Plots
     # ---------------------------------------------------------------
-    print("\n[Step 5] Generating plots...")
+    print("\n[Step 6] Generating plots...")
     generate_latency_plots(gemm_results, prefill_results, out_dir)
 
     # Save combined results
@@ -483,6 +611,7 @@ def main():
         },
         "gemm": gemm_results,
         "prefill": prefill_results,
+        "decode": decode_results,
     }
     with open(out_dir / "all_results.json", "w") as f:
         json.dump(all_results, f, indent=2, default=str)
