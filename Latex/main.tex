@@ -109,7 +109,13 @@ We propose \textbf{GAC} (GPU-Aligned Compression), a new compression \emph{parad
 %% ===========================================
 \section{Dimensional Misalignment}
 \label{sec:misalignment}
-
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{figures/scatter_1x4_meta_llama_3_8b_instruct_r0.8.pdf}
+  \caption{Llama-3-8B at $\rho=20\%$. Shape: $\circ{=}$Q Head, $\square{=}$K Head, $\triangle{=}$V Head; color: \textcolor{cgreen}{green}=8-aligned, \textcolor{cred}{red}=misaligned.}
+  \label{fig:dim_scatter}
+  \end{figure*}
+    
 Existing LLM compression aims to preserve accuracy under a given compression ratio $\rho$.
 Formally, given the set of pretrained parameters $\mathcal{W}$, we seek a compressed set $\mathcal{W}'$ that minimizes expected loss subject to the size constraint:
 \begin{equation}
@@ -159,83 +165,69 @@ Fisher & $\mathrm{tr}(\mathbf{F}_i)$ & Curvature of loss & PaLU~\cite{palu}, FWS
 \end{tabular}
 \end{table}
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{figures/scatter_1x4_meta_llama_3_8b_instruct_r0.8.pdf}
-\caption{Llama-3-8B at $\rho=20\%$. Shape: $\circ{=}$Q Head, $\square{=}$K Head, $\triangle{=}$V Head; color: \textcolor{cgreen}{green}=8-aligned, \textcolor{cred}{red}=misaligned.}
-\label{fig:dim_scatter}
-\end{figure*}
-
 
 %% ===========================================
 %% 3. FULL-STACK ANALYSIS
 %% ===========================================
+
 \section{Full-Stack Analysis}
 \label{sec:analysis}
-
 We analyze where and why dimensional misalignment causes slowdowns on an NVIDIA A100-80GB with PyTorch 2.9.1, CUDA 12.8, FP16.
 Latency is measured with CUDA events (50 warmup, 200 measurement iterations, 3 trials).
-Root causes fall into three layers: \textbf{framework} (backend and template selection for SDPA), \textbf{library} (cuBLAS GEMM and GeMV kernel selection and alignment), and \textbf{hardware} (Tensor Core MMA tile fill, vectorized loads, L2 sector alignment).
-Table~\ref{tab:constraints} summarizes the constraints and typical penalties; the following subsections detail each layer with microbenchmarks and figures.
-
-\begin{table}[t]
-\centering
-\caption{Full-stack alignment constraint summary.}
-\label{tab:constraints}
-\small
-\setlength{\tabcolsep}{2.5pt}
-\begin{tabular}{@{}llll@{}}
-\toprule
-\textbf{Level} & \textbf{Mechanism} & \textbf{Constraint} & \textbf{Penalty} \\
-\midrule
-\rowcolor{cblue!8} Framework & SDPA backend & $d$\%$8{=}0$ & ${\sim}$200\% \\
-\rowcolor{cblue!8} Framework & FA2 template & $d$\%$32{=}0$ & ${\sim}$50\% \\
-\midrule
-\rowcolor{corange!8} Library & cuBLAS GEMM & $K$/$N$\%$8{=}0$ & ${\sim}$163\% \\
-\rowcolor{corange!8} Library & cuBLAS GeMV & (masked) & ${\sim}$14\% \\
-\midrule
-\rowcolor{cred!8} Hardware & L2 sector & $K$\%$16{=}0$ & ${\sim}$57\% \\
-\rowcolor{cred!8} Hardware & TC MMA & $K$\%16, $N$\%8 & ${\sim}$50\% \\
-\bottomrule
-\end{tabular}
-\end{table}
+Root causes fall into three layers (Figure~\ref{fig:fullstack_overview}): Framework, Library, and Hardware. We detail each layer in the following subsections.
+\begin{figure}[t]
+  \centering
+  \resizebox{\columnwidth}{!}{%
+  \begin{tikzpicture}[
+      layer/.style={draw=gray!60, rounded corners=6pt, minimum width=9.5cm, minimum height=1.15cm,
+                    line width=1pt, font=\sffamily\small, align=center, inner sep=6pt},
+      >=stealth, arrow/.style={->, line width=1.4pt, gray!55}
+    ]
+    \node[layer, fill=cblue!18] (fw) at (0,2.8) {
+      \textbf{Framework Layer}\\[1pt]
+      {\footnotesize e.g.\ PyTorch cannot leverage flash attention.}
+    };
+    \node[layer, fill=corange!18] (lib) at (0,1.4) {
+      \textbf{Library Layer}\\[1pt]
+      {\footnotesize e.g.\ cuBLAS selects suboptimal kernel.}
+    };
+    \node[layer, fill=cred!18] (hw) at (0,0) {
+      \textbf{Hardware Layer}\\[1pt]
+      {\footnotesize e.g.\ extra CTA waves, uncoalesced memory access.}
+    };
+    \draw[arrow] (fw.south) -- (lib.north)
+      node[midway, right=0.5cm, font=\sffamily\small\bfseries, text=gray!20!black, fill=white, draw=gray!25, inner sep=2.5pt, rounded corners=2pt] {Dispatches to};
+    \draw[arrow] (lib.south) -- (hw.north)
+      node[midway, right=0.5cm, font=\sffamily\small\bfseries, text=gray!20!black, fill=white, draw=gray!25, inner sep=2.5pt, rounded corners=2pt] {Executes on};
+  \end{tikzpicture}%
+  }
+  \caption{Full-stack analysis.}
+  \label{fig:fullstack_overview}
+  \end{figure}
 
 \subsection{Framework Layer}
 \label{sec:framework}
+Existing DL frameworks such as PyTorch and TensorFlow dispatch an operation to different backends.
+For example, a matrix multiply \texttt{A@B} in PyTorch may run via cuBLAS or via a Triton kernel depending on the shape and hardware, where the dispatching mechanism is hidden from the user.
+In this section, we exemplify this issue via PyTorch's \textbf{SDPA} (Scaled Dot-Product Attention), the core attention mechanism:
+\begin{equation}
+\mathrm{Attention}(Q,K,V) = \mathrm{softmax}(Q K^\top / \sqrt{d_k}) V
+\end{equation}
+When one calls the SDPA API \footnote{\texttt{torch.nn.functional.scaled\_dot\_product\_attention(Q, K, V)}} , PyTorch may select an optimized implementation (e.g., FlashAttention) or fall back to a naive eager implementation (the ``Math'' backend).
 
-The framework chooses the SDPA implementation and, for FlashAttention-2 (FA2), the tile template from head dimension $d$.
-When $d \bmod 8 \neq 0$, PyTorch falls back to the MATH backend (up to $\sim$12$\times$ slower); when $d$ is 8-aligned but crosses FA2 template boundaries (e.g., 64, 96, 128, 160, 192, 224, 256), tile width $B_c$ halves and latency jumps.
-
-We sweep \texttt{head\_dim} from 64 to 256 ($B{=}4$, $S{=}2048$, $H{=}32$).
-As shown in Figure~\ref{fig:sdpa_latency}, FA2 picks the smallest template $t \geq d$; $B_c$ halves at major boundaries (e.g., $128 \to 64 \to 32$), so crossing $d{=}128 \to 129$ causes $\sim$90\% latency increase.
-Non-8-aligned dimensions trigger MATH fallback---e.g., $d{=}107$ incurs 2.14\,ms (+40\% vs $d{=}112$ at 1.53\,ms on Flash).
-Figure~\ref{fig:sdpa_latency} shows the staircase; Table~\ref{tab:fa2_templates} quantifies the tiers.
-
+We measured SDPA latency with inputs $Q,K,V$ of shape $(B, S, H, d)$: batch $B{=}4$, sequence length $S{=}2048$, number of heads $H{=}32$, and we sweep the per-head dimension $d$ from 64 to 256 (full sweep details in Appendix~\ref{app:fa2_templates}).
+We observed a staircase pattern (Figure~\ref{fig:sdpa_latency}).
+First, multiples of 8 are faster: e.g., $d{=}129$ incurs $\sim$90\% higher latency than $d{=}128$.
+Profiling shows that PyTorch uses FlashAttention only when $d \bmod 8 = 0$; otherwise it falls back to the Math kernel.
+Second, among 8-aligned dimensions, $d \bmod 32 = 0$ forms another performance boundary: FlashAttention-2 uses dimension-specific templates, with tile sizes changing every 32 dimensions.
+In the figure, alternating background shades denote template regions; labels such as ``$t{=}96$, $128{\times}64$'' indicate the template size $t$ and the $B_r {\times} B_c$ tile shape for that region.
 \begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig2_sdpa_latency.pdf}
-\caption{SDPA latency vs.\ \texttt{head\_dim} (64--256). When $d \bmod 8 \neq 0$, the MATH fallback is used (red); crossing template boundaries (e.g., $d{=}128 \to 129$) causes up to $\sim$90\% latency increase.}
-\label{fig:sdpa_latency}
-\end{figure}
+  \centering
+  \includegraphics[width=\columnwidth]{figures/fig2_sdpa_latency.pdf}
+  \caption{PyTorch SDPA latency across dimensions.}
+  \label{fig:sdpa_latency}
+  \end{figure}
 
-\begin{table}[t]
-\centering
-\caption{FA2 template tiers and performance ($B{=}4$, $S{=}2048$, $H{=}32$).}
-\label{tab:fa2_templates}
-\small
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}llrrr@{}}
-\toprule
-Region & Template & $B_r \times B_c$ & Latency & vs.\ $t{=}64$ \\
-\midrule
-$d{=}64$ & 64 & 128$\times$128 & 0.74\,ms & 1.0$\times$ \\
-$d \in (64,96]$ & 96 & 128$\times$64 & 1.12\,ms & 1.5$\times$ \\
-$d \in (96,128]$ & 128 & 128$\times$64 & 1.47\,ms & 2.0$\times$ \\
-$d \in (128,160]$ & 160 & 128$\times$32 & 2.00\,ms & 2.7$\times$ \\
-$d \in (160,256]$ & 192--256 & 128$\times$32 & 2.3--2.9\,ms & 3--4$\times$ \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \subsection{Library Layer}
 \label{sec:library}
@@ -275,7 +267,29 @@ Nsight Compute profiling isolates three hardware-level mechanisms (details in Ap
 \textbf{(2)~Vectorized load degradation} ($50{\pm}6$\%): misaligned leading dimensions force scalar \texttt{LDG} instead of \texttt{LDG.128}, halving memory throughput.
 \textbf{(3)~L2 sector misalignment} ($6{\pm}1$\%): microbenchmarks show $\sim$2$\times$ bandwidth loss for misaligned $K$, but cuBLAS padding in GeMV kernels masks this at application level.
 Tensor Core and vectorized-load effects dominate and compound multiplicatively.
+Table~\ref{tab:constraints} summarizes the alignment constraints and typical penalties discussed above.
 
+\begin{table}[t]
+\centering
+\caption{Full-stack alignment constraint summary.}
+\label{tab:constraints}
+\small
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Level} & \textbf{Mechanism} & \textbf{Constraint} & \textbf{Penalty} \\
+\midrule
+\rowcolor{cblue!8} Framework & SDPA backend & $d$\%$8{=}0$ & ${\sim}$200\% \\
+\rowcolor{cblue!8} Framework & FA2 template & $d$\%$32{=}0$ & ${\sim}$50\% \\
+\midrule
+\rowcolor{corange!8} Library & cuBLAS GEMM & $K$/$N$\%$8{=}0$ & ${\sim}$163\% \\
+\rowcolor{corange!8} Library & cuBLAS GeMV & (masked) & ${\sim}$14\% \\
+\midrule
+\rowcolor{cred!8} Hardware & L2 sector & $K$\%$16{=}0$ & ${\sim}$57\% \\
+\rowcolor{cred!8} Hardware & TC MMA & $K$\%16, $N$\%8 & ${\sim}$50\% \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 %% ===========================================
 %% 4. GAC: ALIGNMENT-AWARE COMPRESSION
@@ -522,6 +536,33 @@ Finally, GAC redistributes rank budgets without retraining---a lightweight post-
 %% APPENDIX
 %% ===========================================
 \appendix
+
+\section{FA2 Template Tiers and Dimension Sweep}
+\label{app:fa2_templates}
+
+We sweep \texttt{head\_dim} from 64 to 256 with $B{=}4$, $S{=}2048$, $H{=}32$.
+FlashAttention-2 selects the smallest template $t \geq d$; tile width $B_c$ halves at boundaries (e.g., $128 \to 64 \to 32$), so crossing $d{=}128 \to 129$ causes $\sim$90\% latency increase.
+Non-8-aligned dimensions trigger the MATH fallback (e.g., $d{=}107$ incurs 2.14\,ms, +40\% vs $d{=}112$ at 1.53\,ms on Flash).
+Table~\ref{tab:fa2_templates} quantifies the tiers.
+
+\begin{table}[h]
+\centering
+\caption{FA2 template tiers and performance ($B{=}4$, $S{=}2048$, $H{=}32$).}
+\label{tab:fa2_templates}
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llrrr@{}}
+\toprule
+Region & Template & $B_r \times B_c$ & Latency & vs.\ $t{=}64$ \\
+\midrule
+$d{=}64$ & 64 & 128$\times$128 & 0.74\,ms & 1.0$\times$ \\
+$d \in (64,96]$ & 96 & 128$\times$64 & 1.12\,ms & 1.5$\times$ \\
+$d \in (96,128]$ & 128 & 128$\times$64 & 1.47\,ms & 2.0$\times$ \\
+$d \in (128,160]$ & 160 & 128$\times$32 & 2.00\,ms & 2.7$\times$ \\
+$d \in (160,256]$ & 192--256 & 128$\times$32 & 2.3--2.9\,ms & 3--4$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \section{Dimension Distribution of Evaluated Methods}
 \label{app:dims}
