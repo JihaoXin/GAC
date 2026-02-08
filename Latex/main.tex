@@ -20,6 +20,8 @@
 \usepackage{placeins}
 \usepackage{colortbl}
 \usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 \hfuzz=0pt  % Strict: report ALL overfull boxes
 
 %% Compact spacing
@@ -274,9 +276,9 @@ Misaligned accesses show ${\sim}$2$\times$ bandwidth loss in microbenchmarks (Fi
 \label{fig:hw_alignment}
 \end{figure*}
 
-\paragraph{Sumamry} Table~\ref{tab:constraints} summarizes all constraints.
+\paragraph{Summary.} Table~\ref{tab:constraints} summarizes all constraints.
 The minimum requirement across all layers is $d \bmod 8 = 0$; stricter alignment (mod~16, mod~32) yields further gains.
-These penalties compound a misaligned dimension can trigger a backend fallback, a suboptimal kernel, and underutilized tiles simultaneously.
+These penalties compound: a single misaligned dimension can trigger a backend fallback, a suboptimal kernel, and underutilized tiles simultaneously.
 
 \begin{table}[t]
 \centering
@@ -303,83 +305,81 @@ These penalties compound a misaligned dimension can trigger a backend fallback, 
 %% ===========================================
 %% 4. GAC: ALIGNMENT-AWARE COMPRESSION
 %% ===========================================
-\section{GAC Framework}
+\section{GAC: GPU-Aligned Compression}
 \label{sec:gac}
 
 \input{figures/fig_gac_framework.tex}
 
-\subsection{Overview}
-
-GAC operates as a post-processing wrapper around any existing compressor, adding alignment awareness in three steps (Figure~\ref{fig:gac_framework}):
-\textbf{(1)~Operator Analysis}---profile SDPA and GeMM to identify alignment constraints and performance cliffs (\S\ref{sec:analysis});
-\textbf{(2)~Dimension Sweep}---sweep dimensions near each ideal rank to build a per-projection candidate table of hardware-friendly values;
-\textbf{(3)~Constrained Optimization}---solve a multi-choice knapsack DP to select one candidate per projection, maximizing information preservation under the total parameter budget.
+To bridge the gap between compression and alignment, we propose \textbf{GAC} (GPU-Aligned Compression), a paradigm that makes budget allocation system-aware so that fewer parameters translate into real speedup.
+GAC wraps any dimension-reducing compressor as a post-processing pass, re-selecting dimensions to satisfy alignment constraint.
+Given an LLM + a compressor +  a compression budget, the pipeline produces a 100\%-aligned compressed model in three steps (Figure~\ref{fig:gac_framework}):\\
+\textbf{(1)~Unconstrained Compression}---Compress the model with misaligned dimensions $\{d_i^*\}$ and importance scores $\{s_i\}$.\\
+\textbf{(2)~Dimension Sweep}---For each misaligned weight, sweep near $d_i^*$ and retain only hardware-friendly candidates.\\
+\textbf{(3)~Constrained Optimization}---Formulate a knapsack problem and solve via dynamic programming (DP).
 
 \subsection{Problem Formulation}
 
-Given $n$ projections with Fisher scores $\{f_i\}$, ideal (unconstrained) ranks $\{r_i^*\}$, and total parameter budget $B$, we seek aligned allocations $\{r_i\}$ that maximize Fisher-weighted information preservation:
+Given $n$ projections with importance scores $\{s_i\}$, ideal (unconstrained) dimensions $\{d_i^*\}$, and total parameter budget $B$, we seek aligned dimensions $\{d_i\}$ that maximize importance-weighted information preservation:
 \begin{equation}
-\max_{\{r_i\}} \sum_{i=1}^{n} f_i \cdot (r_i - r_i^*) \;\;\text{s.t.}\;\; \sum_{i} r_i \cdot g_i \leq B,\;\; r_i \in C_i
+\max_{\{d_i\}} \sum_{i=1}^{n} s_i \cdot (d_i - d_i^*) \;\;\text{s.t.}\;\; \sum_{i} d_i \cdot g_i \leq B,\;\; d_i \in C_i
 \label{eq:gac}
 \end{equation}
 where $g_i$ is the group size for projection $i$ and $C_i$ is the set of hardware-friendly candidates.
-The objective is \emph{asymmetric}: rounding up ($r_i > r_i^*$) yields positive value (information preserved), while rounding down yields negative value (information lost), weighted by each layer's Fisher score.
-High-Fisher (sensitive) layers naturally receive more rank; low-Fisher (insensitive) layers absorb the cost.
+The objective is \emph{asymmetric}: rounding up ($d_i > d_i^*$) yields positive value (information preserved), while rounding down yields negative value (information lost), weighted by each layer's importance score.
+High-importance (sensitive) layers naturally receive larger dimensions; low-importance (insensitive) layers absorb the cost.
 
 \subsection{Candidate Generation via Dimension Sweep}
 
 Rather than hard-coding alignment to fixed multiples (e.g., mod~8 or mod~32), GAC generates candidates empirically.
-For each projection, we profile GeMM and SDPA latency at dimensions near $r_i^*$ and retain only those that avoid performance cliffs.
+For each projection, we profile GeMM and SDPA latency at dimensions near $d_i^*$ and retain only those that avoid performance cliffs.
 This produces $|C_i| \approx 11$--$17$ candidates per projection.
 Cliff dimensions---where cuBLAS switches kernel tier or SDPA falls back---are automatically excluded.
-For example, given an ideal rank $r^*{=}107.3$, the sweep produces $C{=}\{96, 104, 112, 128\}$, excluding 107 because it triggers a cuBLAS performance cliff; the DP then picks $r{=}104$, saving budget for more sensitive layers.
+For example, given an ideal dimension $d^*{=}107.3$, the sweep produces $C{=}\{96, 104, 112, 128\}$, excluding 107 because it triggers a cuBLAS performance cliff; the DP then picks $d{=}104$, saving budget for more sensitive layers.
 Because the sweep is hardware-specific, GAC adapts to different GPU architectures without manual tuning.
 
 \subsection{Multi-Choice Knapsack DP}
 
 We solve Eq.~\ref{eq:gac} via dynamic programming.
-For each candidate $r_{ij} \in C_i$, define value $v_{ij} = f_i \cdot (r_{ij} - r_i^*)$ and weight $w_{ij} = r_{ij} \cdot g_i$.
+For each candidate $d_{ij} \in C_i$, define value $v_{ij} = s_i \cdot (d_{ij} - d_i^*)$ and weight $w_{ij} = d_{ij} \cdot g_i$.
 The DP recurrence is:
 \[
 D[i][b] = \max_{j} \left\{ D[i{-}1][b - w_{ij}] + v_{ij} \right\}
 \]
-Complexity: $O(n \cdot |C| \cdot B')$ where $B' = B/(a \cdot g)$ is the quantized budget.
-In practice, with $n$=224 projections and $|C|$$\approx$15, the DP runs in under one second on CPU.
+Complexity: $O(n \cdot |C| \cdot B')$ where $B' = B/(a \cdot g)$ is the quantized budget ($a$: alignment granularity, $g$: group size).
+In practice, with $n{=}224$ projections and $|C| \approx 15$, the DP runs in under one second on CPU.
 
-Figure~\ref{fig:alg_gac} gives the complete procedure.
+Algorithm~\ref{alg:gac} gives the complete procedure.
 
-\begin{figure}[t]
-\centering
-\rule{\columnwidth}{0.5pt}
-\begin{minipage}{0.94\columnwidth}\small
-\textbf{Algorithm:} GAC --- GPU-Aligned Compression\\[2pt]
-\textbf{Input:} Pre-trained LLM, compressor, budget $B$\\
-\textbf{Output:} Aligned ranks $\{r_i\}_{i=1}^n$ with $r_i \in C_i$\\[2pt]
-\rule{\linewidth}{0.3pt}\\[2pt]
-\textit{Phase 1: Compressor \& Analysis}\\[1pt]
-\hspace*{1em}1.\; Run compressor $\to$ ideal ranks $\{r_i^*\}$, Fisher $\{f_i\}$\\
-\hspace*{1em}2.\; Profile GeMM/SDPA $\to$ constraints (\S\ref{sec:analysis})\\[3pt]
-\textit{Phase 2: Candidate Generation}\\[1pt]
-\hspace*{1em}3.\; \textbf{for} each projection $i = 1, \ldots, n$ \textbf{do}\\
-\hspace*{2.5em}Sweep dims near $r_i^*$; measure latency\\
-\hspace*{2.5em}$C_i \gets$ dims avoiding perf.\ cliffs\\[3pt]
-\textit{Phase 3: Multi-Choice Knapsack DP}\\[1pt]
-\hspace*{1em}4.\; $B' \gets B / (a \cdot g)$\\
-\hspace*{1em}5.\; $D[0..n][0..B'] \gets -\infty$;\; $D[0][0] \gets 0$\\
-\hspace*{1em}6.\; \textbf{for} $i = 1$ to $n$ \textbf{do}\\
-\hspace*{2.5em}\textbf{for} each $r_{ij} \in C_i$ \textbf{do}\\
-\hspace*{4em}$v_{ij} \gets f_i \cdot (r_{ij} {-} r_i^*)$;\;
-             $w_{ij} \gets r_{ij} \cdot g_i$\\
-\hspace*{4em}\textbf{for} $b = w_{ij}$ to $B'$ \textbf{do}\\
-\hspace*{5.5em}$D[i][b] \gets \max\!\bigl(D[i][b],\;$\\
-\hspace*{8em}$D[i{-}1][b{-}w_{ij}] + v_{ij}\bigr)$\\
-\hspace*{1em}7.\; Backtrack from $\arg\max_b D[n][b]$\\
-\hspace*{1em}\textbf{return} $\{r_i\}$
-\end{minipage}
-\rule{\columnwidth}{0.5pt}
-\caption{\textbf{GAC algorithm.} Phase~1 uses any existing compressor; Phase~2 profiles hardware; Phase~3 solves the knapsack in $O(n {\cdot} |C| {\cdot} B')$ time ($<$1\,s on CPU for $n$=224).}
-\label{fig:alg_gac}
-\end{figure}
+\begin{algorithm}[t]
+\caption{GAC algorithm ($<$1\,s on CPU for $n{=}224$).}
+\label{alg:gac}
+\small
+\begin{algorithmic}[1]
+\Require Pre-trained LLM, compressor, budget $B$
+\Ensure Aligned dimensions $\{d_i\}_{i=1}^n$ with $d_i \in C_i$
+\Statex \textit{Phase 1: Unconstrained Compression}
+\State Run compressor $\to$ ideal dims $\{d_i^*\}$, scores $\{s_i\}$
+\State Profile GeMM/SDPA $\to$ constraints (\S\ref{sec:analysis})
+\Statex \textit{Phase 2: Candidate Generation}
+\For{each projection $i = 1, \ldots, n$}
+  \State Sweep dims near $d_i^*$; measure latency
+  \State $C_i \gets$ dims avoiding perf.\ cliffs
+\EndFor
+\Statex \textit{Phase 3: Multi-Choice Knapsack DP}
+\State $B' \gets B / (a \cdot g)$
+\State $D[0..n][0..B'] \gets -\infty$;\; $D[0][0] \gets 0$
+\For{$i = 1$ to $n$}
+  \For{each $d_{ij} \in C_i$}
+    \State $v_{ij} \gets s_i \cdot (d_{ij} {-} d_i^*)$;\; $w_{ij} \gets d_{ij} \cdot g_i$
+    \For{$b = w_{ij}$ to $B'$}
+      \State $D[i][b] \gets \max\!\bigl(D[i][b],\; D[i{-}1][b{-}w_{ij}] + v_{ij}\bigr)$
+    \EndFor
+  \EndFor
+\EndFor
+\State Backtrack from $\arg\max_b D[n][b]$
+\State \Return $\{d_i\}$
+\end{algorithmic}
+\end{algorithm}
 
 
 %% ===========================================
@@ -391,21 +391,19 @@ Figure~\ref{fig:alg_gac} gives the complete procedure.
 \subsection{Setup}
 
 \paragraph{Model and hardware.}
-Llama-3-8B~\cite{llama3} (8.03B parameters) on NVIDIA A100 80GB, PyTorch 2.9.1, CUDA 12.8.
+Llama-3-8B~\cite{llama3} (8.03B parameters) on NVIDIA A100-80GB, PyTorch 2.9.1, CUDA 12.8, FP16.
 All latency is prefill (compute-bound GeMM); we focus on prefill because it is where alignment most affects performance.
 
 \paragraph{Compression methods.}
 We evaluate two representative methods that change tensor dimensions in orthogonal ways:
-\textbf{(1)~ASVD}~\cite{asvd}: Activation-aware SVD factorization applied to all 224 attention and MLP projections, compressing 15\% of parameters.
-Each weight $W$ is decomposed into $A \cdot B$ where the inner dimension (rank) $r$ is allocated based on PPL-calibrated sensitivity.
-\textbf{(2)~LLM-Pruner}~\cite{llmpruner}: Coupled structured pruning of MLP intermediate dimensions across 28 of 32 layers, removing 15\% of parameters.
-Each layer's intermediate dimension is reduced independently based on importance.
+\textbf{(1)~ASVD}~\cite{asvd}: activation-aware SVD across all $n{=}224$ projections ($W {\to} A {\cdot} B$), rank allocated by PPL-calibrated sensitivity; 15\% compression.
+\textbf{(2)~LLM-Pruner}~\cite{llmpruner}: coupled structured pruning of MLP intermediate dimensions across 28/32 layers; 15\% compression.
 
 \paragraph{Strategies.}
-For each compressor: \emph{Unaligned} (default output with irregular dimensions) and \emph{GAC} (dimensions aligned to multiples of 8).
+For each compressor: \emph{Unaligned} (default output with irregular dimensions) and \emph{GAC} (dimensions aligned, $d \bmod 8 = 0$).
 
 \paragraph{Metrics.}
-Alignment (\% of projections where $d \bmod 8 = 0$), perplexity (WikiText-2, 2048-token blocks), accuracy (average of PIQA and HellaSwag zero-shot), and prefill latency ($S$=1024, batch=1, 30 measurements after warmup).
+Alignment (\% of projections where $d \bmod 8 = 0$), perplexity (WikiText-2, 2048-token blocks), accuracy (average of PIQA and HellaSwag zero-shot), and prefill latency ($S{=}1024$, batch${=}1$, 30 measurements after warmup).
 
 \subsection{Main Results}
 
@@ -413,7 +411,7 @@ Table~\ref{tab:main_results} presents the end-to-end comparison.
 
 \begin{table}[t]
 \centering
-\caption{\textbf{Main results} on Llama-3-8B (15\% compression, A100 80GB). Prefill latency at sequence length 1024. Percentages are relative to baseline.}
+\caption{Main results on Llama-3-8B (15\% compression, A100-80GB, $S{=}1024$).}
 \label{tab:main_results}
 \small
 \setlength{\tabcolsep}{3pt}
@@ -433,7 +431,7 @@ Pruner (GAC) & 100\% & \textbf{9.87} & 0.67 & \textbf{88.0}\,{\scriptsize\textco
 \end{table}
 
 \paragraph{ASVD: SVD factorization.}
-The unconstrained allocation produces 95\% misaligned ranks.
+The unconstrained allocation produces 95\% misaligned dimensions.
 Despite reducing parameters by 15\%, the misaligned model shows \emph{no prefill speedup} (100.5\,ms vs 99.6\,ms baseline)---the compression benefit is entirely consumed by alignment overhead.
 GAC restores alignment to 100\%, yielding a 1.5$\times$ prefill speedup (67.1\,ms, $-$33\% vs baseline).
 Notably, GAC also improves perplexity (31.3 vs 34.7) because the DP rounds sensitive layers \emph{up}, preserving information where it matters most.
@@ -444,14 +442,14 @@ GAC eliminates the penalty entirely, achieving a net 12\% speedup over the uncom
 Quality is preserved: PPL and accuracy are nearly identical between Unaligned and GAC variants.
 
 \paragraph{Rank allocation visualization.}
-Figure~\ref{fig:gac_ranks} shows per-layer rank allocations for $W_K$ and $W_V$ projections under three strategies.
-For $W_K$ (top), GAC DP deviates from both Unaligned and Round-to-8: it rounds \emph{up} for high-Fisher layers (e.g., layers 14--16) and rounds down for insensitive ones, exploiting the asymmetric objective.
+Figure~\ref{fig:gac_ranks} shows per-layer dimension allocations for $W_K$ and $W_V$ projections under three strategies.
+For $W_K$ (top), GAC DP deviates from both Unaligned and Round-to-8: it rounds \emph{up} for high-importance layers (e.g., layers 14--16) and rounds down for insensitive ones, exploiting the asymmetric objective.
 For $W_V$ (bottom), most layers retain the full rank (512), with GAC maintaining alignment at the few compressed layers (18--26).
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig_gac_ranks.pdf}
-\caption{Per-layer rank allocation for $W_K$ (top) and $W_V$ (bottom) projections. GAC DP (blue) deviates from na\"ive rounding (orange) by allocating more rank to sensitive layers.}
+\caption{Per-layer rank allocation for $W_K$ (top) and $W_V$ (bottom).}
 \label{fig:gac_ranks}
 \end{figure}
 
@@ -463,11 +461,11 @@ Figure~\ref{fig:prefill_scaling} shows LLM-Pruner prefill latency at four sequen
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig_prefill_scaling.pdf}
-\caption{LLM-Pruner prefill latency scaling. The misalignment penalty (red vs.\ gray) grows from +19\% at $S{=}128$ to +38\% at $S{=}1024$ as GeMMs become increasingly compute-bound. GAC (green) consistently matches or beats the uncompressed baseline.}
+\caption{LLM-Pruner prefill latency across sequence lengths.}
 \label{fig:prefill_scaling}
 \end{figure}
 
-The penalty grows from +19\% ($S{=}128$) to +38\% ($S{=}1024$): longer sequences push GeMMs deeper into the compute-bound regime, where Tensor Core utilization and thus alignment dominate.
+The penalty grows from +19\% ($S{=}128$) to +38\% ($S{=}1024$): longer sequences push GeMMs deeper into the compute-bound regime, where Tensor Core utilization---and thus alignment (\S\ref{sec:hardware})---dominates.
 At $S{=}128$ the model is still partially memory-bound, hiding some misalignment cost; by $S{=}1024$ the penalty is fully exposed.
 GAC maintains ${\sim}$12\% speedup over the \emph{uncompressed} baseline for $S \geq 256$, showing that aligned compression delivers both smaller models and faster inference.
 
@@ -475,7 +473,7 @@ GAC maintains ${\sim}$12\% speedup over the \emph{uncompressed} baseline for $S 
 
 \paragraph{Why compression does not always speed up inference.}
 ASVD decomposes each weight $W$ into two smaller matrices $A$ and $B$, halving FLOPs per projection but doubling the number of GeMM calls.
-When ranks are misaligned, each GeMM triggers Tier~2/3 kernels with lower throughput, negating the FLOP reduction entirely---hence the +1\% ``speedup'' of unaligned ASVD.
+When dimensions are misaligned, each GeMM triggers Tier~2/3 kernels (Table~\ref{tab:cublas_tiers}) with lower throughput, negating the FLOP reduction entirely---hence the +1\% ``speedup'' of unaligned ASVD.
 LLM-Pruner reduces MLP intermediate dimensions but produces sizes like 5931, 6054, and 6778, which fall outside cuBLAS's optimal kernel range.
 Even the 83\% naturally-aligned dimensions cannot prevent the +38\% penalty because the remaining 17\% misaligned layers dominate the critical path.
 
@@ -492,26 +490,27 @@ For compression libraries, GAC adds negligible computation as a post-processing 
 \label{sec:related}
 
 \textbf{LLM compression.}
-SVD-based methods~\cite{asvd,svdllm2024,palu,fwsvd2022,gfwsvd2025} allocate per-layer ranks via importance scores, producing irregular dimensions as a by-product.
+SVD-based methods~\cite{asvd,svdllm2024,palu,fwsvd2022,gfwsvd2025} allocate per-layer dimensions via importance scores, producing irregular dimensions as a by-product.
 Structured pruning~\cite{sparsegpt,wanda,llmpruner} and KV cache compression~\cite{h2o,quest,pyramidkv} similarly alter tensor shapes without considering hardware alignment.
-Quantization~\cite{gptq,awq} preserves tensor dimensions via fixed-width groups, naturally avoiding dimensional misalignment.
-GAC is complementary to all dimension-altering compressors: it post-processes their output to restore alignment.
+Quantization~\cite{gptq,awq} preserves dimensions via fixed-width groups, naturally avoiding misalignment.
+All dimension-altering compressors are \emph{hardware-agnostic}: they optimize accuracy under a size budget but ignore how chosen dimensions interact with the GPU execution stack (\S\ref{sec:analysis}).
+GAC is complementary---it post-processes any such compressor's output to restore alignment.
 
 \textbf{Hardware-aware optimization.}
 HALP~\cite{halp2021} formulates CNN pruning as latency-budgeted optimization using end-to-end timing; HALOC~\cite{haloc2023} uses a differentiable latency predictor for CNN low-rank compression.
-Both treat latency as a black-box signal---they optimize aggregate runtime without isolating \emph{why} certain dimensions are slow.
-In contrast, GAC identifies the root cause (dimensional misalignment across framework, library, and hardware layers) and constrains the search space accordingly, while guaranteeing the parameter budget.
+Both treat latency as a \emph{black-box} signal---they optimize aggregate runtime without isolating \emph{why} certain dimensions are slow, are tied to specific architectures, and offer no parameter-budget guarantee.
+GAC instead identifies root causes (framework dispatch, kernel selection, and hardware tile alignment; \S\ref{sec:analysis}) and constrains the search space directly, guaranteeing both alignment and the parameter budget.
 
 \textbf{Serving-side mitigations.}
-Serving systems handle misalignment reactively: FlashAttention-2 pads to the next template ($\sim$30\% overhead); vLLM~\cite{vllm} rejects unsupported \texttt{head\_dim} entirely; TensorRT~\cite{tensorrt} applies runtime padding.
-These methods add memory and compute overhead but cannot change the model itself.
-GAC prevents misalignment at compression time, eliminating the need for runtime padding or rejection.
+Serving systems handle misalignment \emph{reactively}.
+FlashAttention-2 pads to the next template (${\sim}$30\% overhead); vLLM~\cite{vllm} rejects unsupported head dimensions; TensorRT~\cite{tensorrt} pads at runtime.
+These add overhead but cannot change the model.
+GAC prevents misalignment at \emph{compression time}, eliminating runtime workarounds.
 
-\textbf{Limitations and future directions.}
+\textbf{Limitations and future work.}
 Our evaluation covers two compressors, one model (Llama-3-8B), and one GPU (A100).
-Alignment constraints grow stricter across GPU generations~\cite{nvidia_tensor_core_evolution2024}: Hopper introduces TMA with 128-byte transfers~\cite{nvidia_hopper_whitepaper}, and FlashAttention-3~\cite{flashattention3} drops support for \texttt{head\_dim} 96 and 112---suggesting the penalties we observe will only increase on newer hardware.
-The current prototype operates as an offline post-processing pass; integrating GAC directly into compression libraries would make alignment-aware allocation automatic.
-How alignment constraints interact when multiple techniques are composed (e.g., SVD + quantization) and whether a lightweight post-GAC finetuning pass can further recover quality at aggressive ratios remain open questions.
+Alignment constraints grow stricter across GPU generations~\cite{nvidia_tensor_core_evolution2024}: Hopper introduces TMA with 128-byte transfers~\cite{nvidia_hopper_whitepaper}, and FlashAttention-3~\cite{flashattention3} drops support for \texttt{head\_dim} 96 and 112---suggesting that misalignment penalties will only increase on newer hardware.
+Integrating GAC directly into compression libraries, extending to composed techniques (e.g., SVD + quantization), and adding a lightweight post-GAC finetuning pass are natural next steps.
 
 
 %% ===========================================
@@ -570,13 +569,13 @@ The alignment penalty is smaller than GeMM (${\sim}$12\% on $K$, ${\sim}$4\% on 
 \section{Dimension Distribution of Evaluated Methods}
 \label{app:dims}
 
-Figure~\ref{fig:dim_distribution} shows the per-layer dimension distributions for ASVD (ranks across 224 projections) and LLM-Pruner (MLP intermediate dimensions across 28 pruned layers).
-ASVD ranks range from 300 to 3,185 with 0\% initial alignment; LLM-Pruner dimensions range from 5,931 to 14,336 with 83\% alignment.
+Figure~\ref{fig:dim_distribution} shows per-layer dimension distributions for ASVD (224 projections) and LLM-Pruner (28 pruned MLP layers).
+ASVD dimensions range from 300 to 3,185 with 0\% initial alignment; LLM-Pruner from 5,931 to 14,336 with 83\% alignment.
 
 \begin{figure*}[h]
 \centering
 \includegraphics[width=0.85\textwidth]{figures/fig_dim_distribution.pdf}
-\caption{Per-layer dimension distributions for ASVD (top) and LLM-Pruner (bottom) on Llama-3-8B with 15\% compression. ASVD: 0\% aligned before GAC; LLM-Pruner: 83\% aligned.}
+\caption{Per-layer dimension distributions for ASVD (top) and LLM-Pruner (bottom).}
 \label{fig:dim_distribution}
 \end{figure*}
 
@@ -585,7 +584,7 @@ ASVD ranks range from 300 to 3,185 with 0\% initial alignment; LLM-Pruner dimens
 \label{app:scatter_ratios}
 
 The misalignment problem persists across different compression ratios.
-Figure~\ref{fig:scatter_ratios} shows dimension scatter plots for Llama-3-8B under unconstrained SVD allocation at five compression levels ($\rho=0.5$, 0.6, 0.7, 0.8, 0.9) using the Fisher scoring method.
+Figure~\ref{fig:scatter_ratios} shows dimension scatter plots for Llama-3-8B under unconstrained SVD allocation at five compression levels ($\rho=0.5$, 0.6, 0.7, 0.8, 0.9) using Fisher importance scores.
 At every ratio, a substantial fraction (40--80\%) of dimensions are misaligned, confirming that dimensional misalignment is inherent to importance-based rank allocation, not an artifact of aggressive compression.
 
 \begin{figure*}[h]
@@ -612,7 +611,7 @@ At every ratio, a substantial fraction (40--80\%) of dimensions are misaligned, 
 \includegraphics[width=\textwidth]{figures/scatter_1x4_mistral_7b_v0_3_r0.8.pdf}
 \caption{Mistral-7B, $\rho=0.8$ (cross-model)}
 \end{subfigure}
-\caption{SVD rank distributions under unconstrained allocation at various compression ratios and models. Each row shows per-layer head dimensions under four scoring methods. Green = 8-aligned; red = misaligned. Misalignment (50--90\%) is pervasive across all ratios, methods, and model architectures.}
+\caption{SVD rank distributions across compression ratios and models.}
 \label{fig:scatter_ratios}
 \end{figure*}
 

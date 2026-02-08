@@ -1,4 +1,4 @@
-% fig_gac_framework.tex — GAC Framework Pipeline (simplified, no repair path)
+% fig_gac_framework.tex — GAC Framework Pipeline
 % Usage: \input{figures/fig_gac_framework.tex}
 \begin{figure*}[t]
 \centering
@@ -25,10 +25,10 @@
     {\footnotesize + Compressor}
   };
 
-  % Step 1: Operator Analysis
-  \node[phase, cblue, text=white] (analysis) at (3.8, 0) {
-    \textbf{Operator}\\[1pt]
-    \textbf{Analysis}
+  % Step 1: Unconstrained Compression
+  \node[phase, cblue, text=white] (compress) at (3.0, 0) {
+    \textbf{Unconstrained}\\[1pt]
+    \textbf{Compression}
   };
 
   % Step 2: Dimension Sweep
@@ -51,16 +51,12 @@
   };
 
   % Arrows
-  \draw[arrow] (input) -- (analysis);
-  \draw[arrow] (analysis) -- (sweep) node[midway, above=2pt, lbl] {Constraints};
+  \draw[arrow] (input) -- (compress);
+  \draw[arrow] (compress) -- (sweep) node[midway, above=0pt, lbl] {Compressed LLM\\(Misaligned)};
   \draw[arrow] (sweep) -- (dp) node[midway, above=2pt, lbl] {Candidates};
   \draw[arrow] (dp) -- (output) node[midway, above=2pt, lbl] {Dimensions};
 
 \end{tikzpicture}
-\caption{\textbf{GAC framework.}
-Three-step pipeline: (1)~Operator Analysis extracts alignment constraints from the full stack (\S\ref{sec:analysis});
-(2)~Dimension Sweep profiles latency near each ideal rank $r_i^*$ to generate cliff-free candidate sets;
-(3)~Knapsack DP selects one candidate per projection, maximizing Fisher-weighted information preservation under the parameter budget.
-GAC wraps any existing compressor without modifying its core algorithm.}
+\caption{GAC pipeline: compress → sweep → optimize → aligned model.}
 \label{fig:gac_framework}
 \end{figure*}
