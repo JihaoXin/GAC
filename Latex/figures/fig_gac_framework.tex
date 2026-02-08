@@ -21,29 +21,26 @@
   % Input
   \node[iobox, fill=gray!10, draw=gray!50] (input) at (0, 0) {
     \textbf{Input}\\[1pt]
-    {\footnotesize LLM + budget}\\[-1pt]
-    {\footnotesize + compressor}
+    {\footnotesize LLM + Budget}\\[-1pt]
+    {\footnotesize + Compressor}
   };
 
   % Step 1: Operator Analysis
   \node[phase, cblue, text=white] (analysis) at (3.8, 0) {
-    \textbf{Op.\ Analysis}\\[1pt]
-    {\footnotesize SDPA / GEMM}\\[-1pt]
-    {\footnotesize constraints (\S3)}
+    \textbf{Operator}\\[1pt]
+    \textbf{Analysis}
   };
 
   % Step 2: Dimension Sweep
   \node[phase, corange, text=white] (sweep) at (7.6, 0) {
-    \textbf{Dim Sweep}\\[1pt]
-    {\footnotesize Profile near $r_i^*$}\\[-1pt]
-    {\footnotesize $\to$ candidates $C_i$}
+    \textbf{Dimensional}\\[1pt]
+    \textbf{Sweep}
   };
 
   % Step 3: Knapsack DP
   \node[phase, fill=violet!70!blue, text=white] (dp) at (11.4, 0) {
-    \textbf{Knapsack DP}\\[1pt]
-    {\footnotesize $\max \sum f_i(r_i {-} r_i^*)$}\\[-1pt]
-    {\footnotesize s.t.\ budget $B$}
+    \textbf{Dynamic}\\[1pt]
+    \textbf{Programming}
   };
 
   % Output
@@ -57,7 +54,7 @@
   \draw[arrow] (input) -- (analysis);
   \draw[arrow] (analysis) -- (sweep) node[midway, above=2pt, lbl] {constraints};
   \draw[arrow] (sweep) -- (dp) node[midway, above=2pt, lbl] {candidates};
-  \draw[arrow] (dp) -- (output) node[midway, above=2pt, lbl] {ranks $\{r_i\}$};
+  \draw[arrow] (dp) -- (output) node[midway, above=2pt, lbl] {Dimensions};
 
 \end{tikzpicture}
 \caption{\textbf{GAC framework.}

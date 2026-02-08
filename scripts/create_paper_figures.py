@@ -208,7 +208,7 @@ def fig2_sdpa_latency():
     dims = np.array(sorted(all_measurements.keys()))
     latencies = np.array([all_measurements[d] for d in dims])
 
-    fig, ax = plt.subplots(figsize=(3.3, 2.2))
+    fig, ax = plt.subplots(figsize=(3.3, 1.85))
 
     # Draw segments between consecutive points, colored by backend
     for i in range(len(dims) - 1):
@@ -256,12 +256,12 @@ def fig2_sdpa_latency():
         mid = (t0 + t1) / 2
         br_bc = tmpl_bxbc.get(t1, '?')
         label = f't={t1}\n{br_bc}'
-        # First 3 tiers at top, rest at bottom (avoid overlap with data)
+        # First 3 tiers at top, rest at bottom (avoid overlap with data/legend)
         if t1 <= 160:
-            ax.text(mid, 0.97, label, transform=ax.get_xaxis_transform(),
+            ax.text(mid, 0.96, label, transform=ax.get_xaxis_transform(),
                     fontsize=5.5, ha='center', va='top', color=_tmpl_clr)
         else:
-            ax.text(mid, 0.03, label, transform=ax.get_xaxis_transform(),
+            ax.text(mid, 0.04, label, transform=ax.get_xaxis_transform(),
                     fontsize=5.5, ha='center', va='bottom', color=_tmpl_clr)
     # d=64 uses template=64 (128×128) — just one point, note in caption
 
@@ -289,10 +289,10 @@ def fig2_sdpa_latency():
     ax.set_xticks(templates)
     ax.legend(fontsize=5, loc='upper left', framealpha=0.9,
               handletextpad=0.3, borderpad=0.3,
-              bbox_to_anchor=(0.0, 0.82))
+              bbox_to_anchor=(0.0, 0.86))
     ax.grid(True, axis='y', alpha=0.2, linewidth=0.4)
 
-    fig.subplots_adjust(left=0.13, right=0.97, top=0.95, bottom=0.15)
+    fig.subplots_adjust(left=0.13, right=0.97, top=0.92, bottom=0.16)
     fig.savefig(OUTPUT_DIR / 'fig2_sdpa_latency.pdf')
     fig.savefig(OUTPUT_DIR / 'fig2_sdpa_latency.png')
     plt.close()
@@ -985,7 +985,7 @@ def fig_prefill_scaling(results_path='results/llmpruner_llama3_v2/results.json')
     x = np.arange(len(seq_lens))
     width = 0.25
 
-    fig, ax = plt.subplots(figsize=(3.3, 2.2))
+    fig, ax = plt.subplots(figsize=(3.3, 1.6))
 
     bars_base = ax.bar(x - width, baseline_vals, width, label='Baseline',
                        color=COLORS['neutral'], alpha=0.7, edgecolor='white', linewidth=0.5)
