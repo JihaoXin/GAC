@@ -998,6 +998,58 @@ def fig_prefill_scaling(results_path='results/llmpruner_llama3_v2/results.json')
     print("Saved: fig_prefill_scaling.pdf (prefill latency bar chart)")
 
 
+def fig_gemv_alignment(data_path='results/gemv_fine_sweep.json'):
+    """GeMV alignment sweep: K sweep (top) and N sweep (bottom), single-column."""
+    p = Path(data_path)
+    if not p.exists():
+        print(f"Skipping fig_gemv_alignment: {p} not found")
+        return
+
+    with open(p) as f:
+        data = json.load(f)
+
+    fig, axes = plt.subplots(2, 1, figsize=(3.3, 2.8), sharex=True,
+                              gridspec_kw={'hspace': 0.12})
+
+    for ax, sweep_key, xlabel in [(axes[0], 'K_sweep', '$K$ Dimension'),
+                                   (axes[1], 'N_sweep', '$N$ Dimension')]:
+        sweep = data[sweep_key]
+        dims = [d['K'] if 'K_sweep' == sweep_key else d['N'] for d in sweep]
+        times = [d['mean_ms'] * 1000 for d in sweep]  # ms → μs
+
+        aligned_dims = [d for d in dims if d % 8 == 0]
+        aligned_times = [t for d, t in zip(dims, times) if d % 8 == 0]
+        misaligned_dims = [d for d in dims if d % 8 != 0]
+        misaligned_times = [t for d, t in zip(dims, times) if d % 8 != 0]
+
+        ax.plot(misaligned_dims, misaligned_times, color=COLORS['misaligned'],
+                linewidth=0.6, alpha=0.7, label='Misaligned', zorder=1)
+        ax.plot(aligned_dims, aligned_times, color=COLORS['aligned'],
+                linewidth=1.0, alpha=0.9, label=r'Aligned ($d$ mod $8{=}0$)', zorder=2)
+
+        # Fill between: interpolate aligned to full range for shading
+        all_aligned_interp = np.interp(dims, aligned_dims, aligned_times)
+        ax.fill_between(dims, all_aligned_interp, times,
+                        where=[t > a for t, a in zip(times, all_aligned_interp)],
+                        color=COLORS['misaligned'], alpha=0.1, label='Alignment penalty',
+                        zorder=0)
+
+        ax.set_ylabel('Latency (μs)', fontsize=7)
+        ax.tick_params(labelsize=6)
+        # Legend in lower-right of each panel
+        ax.legend(fontsize=5, loc='lower right', framealpha=0.8,
+                  ncol=1, handletextpad=0.3, borderpad=0.3, title_fontsize=5.5,
+                  title='$K$ sweep' if sweep_key == 'K_sweep' else '$N$ sweep')
+
+    axes[1].set_xlabel('Dimension', fontsize=7)
+
+    fig.subplots_adjust(left=0.15, right=0.97, top=0.95, bottom=0.13)
+    fig.savefig(OUTPUT_DIR / 'fig_gemv_alignment.pdf')
+    fig.savefig(OUTPUT_DIR / 'fig_gemv_alignment.png')
+    plt.close()
+    print("Saved: fig_gemv_alignment.pdf (GeMV alignment, 2-panel vertical)")
+
+
 def fig_dim_distribution():
     """Appendix: Per-layer dimension distributions for ASVD (top) and LLM-Pruner (bottom).
     Legend is drawn with larger font and frame for readability.

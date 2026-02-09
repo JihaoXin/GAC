@@ -116,7 +116,6 @@ We propose \textbf{GAC} (GPU-Aligned Compression), a new compression \emph{parad
   \includegraphics[width=\textwidth]{figures/scatter_1x4_meta_llama_3_8b_instruct_r0.8.pdf}
   \caption{Llama-3-8B at $\rho=20\%$. Shape: $\circ{=}$Q Head, $\square{=}$K Head, $\triangle{=}$V Head; color: \textcolor{cgreen}{green}=8-aligned, \textcolor{cred}{red}=misaligned.}
   \label{fig:dim_scatter}
-  \vspace{-0.3cm}
   \end{figure*}
 
 
@@ -233,7 +232,14 @@ First, $K$ and $N$ exhibit a clear alignment effect: when the swept dimension sa
 Second, $M$ and $N$ show \emph{kernel-switching cliffs}: at certain boundaries (e.g., $M{=}1728 \to 1729$), latency jumps (e.g., $\sim$30\%).
 We profiled with Nsight Compute to explain this: when $d \bmod 8 = 0$, cuBLAS invokes its native optimized kernel; otherwise it uses a CUTLASS-generated kernel, which is further divided into align2 (fetching 2 elements at a time) or align1.
 Table~\ref{tab:cublas_tiers} summarizes the three tiers.
-GeMV ($M{=}1$) exhibits a similar but smaller penalty (${\sim}$12\% on $K$, ${\sim}$4\% on $N$; Appendix~\ref{app:gemv}), consistent with GeMV being memory-bound rather than compute-bound.
+GeMV ($M{=}1$) exhibits a similar but smaller penalty (${\sim}$12\% on $K$, ${\sim}$4\% on $N$; Figure~\ref{fig:gemv_alignment}), consistent with GeMV being memory-bound rather than compute-bound.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_gemv_alignment.pdf}
+\caption{GeMV latency ($M{=}1$, stride-1 sweep near 4096).}
+\label{fig:gemv_alignment}
+\end{figure}
 \begin{table}[t]
 \centering
 \caption{cuBLAS GEMM kernel tiers (Nsight Compute).}
@@ -406,8 +412,8 @@ We compare the no compression \emph{baseline} with \emph{Unaligned} (original co
 
 \subsection{Implementation}
 
-GAC is implemented as a lightweight post-processing pass.
-The dimension sweep profiles compression-sensitive kernels\footnote{In Transformers, mainly GeMM, SDPA and GeMV.} latency on the target GPU to build candidate sets (\S\ref{sec:step2}); the DP solver (\S\ref{sec:step3}) then selects aligned dimensions.
+We implement GAC as a proof-of-concept by adding the DP solver on top of the existing ASVD and LLM-Pruner codebases (not yet a standalone framework; see \S\ref{sec:future}).
+The dimension sweep profiles compression-sensitive kernels\footnote{In Transformers, mainly GeMM, SDPA and GeMV.} on the target GPU to build candidate sets (\S\ref{sec:step2}); the DP solver (\S\ref{sec:step3}) then selects aligned dimensions.
 No model architecture changes, no runtime overhead, and no extra inference memory are required---GAC modifies only the dimension allocation before the final compression step.
 
 \subsection{Preliminary Results}
@@ -446,6 +452,7 @@ For ASVD, GAC lowers PPL from 34.7 to 31.3 because the DP rounds sensitive layer
 For LLM-Pruner, PPL is nearly identical (9.88 vs.\ 9.87) and downstream accuracy is well preserved (PiQA 0.80$\to$0.78, HellaSwag 0.49$\to$0.47), confirming that aligned re-selection does not sacrifice quality.
 
 \noindent \textbf{Latency.}
+We measure prefill latency (batch${=}1$, $S{=}1024$; decode latency is left for future work).
 Despite reducing parameters by 15\%, unaligned ASVD shows \emph{no speedup} (100.5\,ms vs.\ 99.6\,ms baseline)---the benefit is consumed by alignment overhead.
 GAC restores a 1.5$\times$ speedup (67.1\,ms, $-$33\%).
 For LLM-Pruner, even 83\% alignment still incurs +38\% latency; GAC eliminates the penalty, achieving 12\% speedup over the \emph{uncompressed} baseline.
@@ -462,31 +469,51 @@ The penalty grows with sequence length (Figure~\ref{fig:prefill_scaling}): from 
 %% ===========================================
 %% 6. RELATED WORK AND DISCUSSION
 %% ===========================================
-\section{Related Work and Discussion}
+\section{Related Work}
 \label{sec:related}
 
-\textbf{LLM compression.}
+\noindent \textbf{LLM compression.}
 SVD-based methods~\cite{asvd,svdllm2024,palu,fwsvd2022,gfwsvd2025} allocate per-layer dimensions via importance scores, producing irregular dimensions as a by-product.
-Structured pruning~\cite{sparsegpt,wanda,llmpruner} and KV cache compression~\cite{h2o,quest,pyramidkv} similarly alter tensor shapes without considering hardware alignment.
-Quantization~\cite{gptq,awq} preserves dimensions via fixed-width groups, naturally avoiding misalignment.
+Structured pruning~\cite{sparsegpt,wanda,llmpruner, h2o,quest,pyramidkv} similarly alter tensor shapes without considering hardware alignment.
 All dimension-altering compressors are \emph{hardware-agnostic}: they optimize accuracy under a size budget but ignore how chosen dimensions interact with the GPU execution stack (\S\ref{sec:analysis}).
 GAC is complementary---it post-processes any such compressor's output to restore alignment.
 
-\textbf{Hardware-aware optimization.}
+\noindent \textbf{Hardware-aware optimization.}
 HALP~\cite{halp2021} formulates CNN pruning as latency-budgeted optimization using end-to-end timing; HALOC~\cite{haloc2023} uses a differentiable latency predictor for CNN low-rank compression.
 Both treat latency as a \emph{black-box} signal---they optimize aggregate runtime without isolating \emph{why} certain dimensions are slow, are tied to specific architectures, and offer no parameter-budget guarantee.
 GAC instead identifies root causes (framework dispatch, kernel selection, and hardware tile alignment; \S\ref{sec:analysis}) and constrains the search space directly, guaranteeing both alignment and the parameter budget.
 
-\textbf{Serving-side mitigations.}
+\noindent \textbf{Serving-side mitigations.}
 Serving systems handle misalignment \emph{reactively}.
-FlashAttention-2 pads to the next template (${\sim}$30\% overhead); vLLM~\cite{vllm} rejects unsupported head dimensions; TensorRT~\cite{tensorrt} pads at runtime.
-These add overhead but cannot change the model.
-GAC prevents misalignment at \emph{compression time}, eliminating runtime workarounds.
+FlashAttention-2 pads to the next template
+(${\sim}$30\% overhead; \S\ref{sec:framework}); vLLM~\cite{vllm} rejects unsupported head dimensions.
+These add overhead or break compatibility.
+GAC prevents misalignment at compression time, eliminating such workarounds.
 
-\textbf{Limitations and future work.}
-Our evaluation covers two compressors, one model (Llama-3-8B), and one GPU (A100).
-Alignment constraints grow stricter across GPU generations~\cite{nvidia_tensor_core_evolution2024}: Hopper introduces TMA with 128-byte transfers~\cite{nvidia_hopper_whitepaper}, and FlashAttention-3~\cite{flashattention3} drops support for \texttt{head\_dim} 96 and 112---suggesting that misalignment penalties will only increase on newer hardware.
-Integrating GAC directly into compression libraries, extending to composed techniques (e.g., SVD + quantization), and adding a lightweight post-GAC finetuning pass are natural next steps.
+\section{Limitations and Future Work}
+\label{sec:future}
+
+\noindent \textbf{Framework automation.}
+Our current implementation adds the GAC DP solver on top of the ASVD and LLM-Pruner codebases.
+A fully general GAC framework---where users supply only a model name, compression ratio, and compressor, and receive a 100\%-aligned model---remains future work.
+
+\noindent \textbf{Model coverage.}
+We evaluate on a single dense model (Llama-3-8B).
+Extending to more variaties(larger scales, MoE architectures, etc.) would test GAC's generality.
+
+\noindent \textbf{Hardware diversity.}
+All experiments use Ampere (A100).
+Newer GPUs impose stricter alignment~\cite{nvidia_tensor_core_evolution2024,nvidia_hopper_whitepaper,flashattention3};
+edge devices (e.g., DGX Spark) add further constraints.
+Profiling across generations would yield a broader heuristic landscape.
+
+\noindent \textbf{Latency coverage.}
+We report prefill latency at batch${=}1$, $S{=}1024$.
+Covering a wider range of batch sizes and sequence lengths, as well as autoregressive decode latency, would give a fuller performance picture.
+
+\noindent \textbf{Serving-engine compatibility.}
+Our benchmarks use vanilla HuggingFace PyTorch models without any inference-time optimization.
+Validating GAC under optimized serving engines (e.g., vLLM~\cite{vllm}, TensorRT~\cite{tensorrt}) and DL compilers (e.g., TVM) is needed to confirm alignment gains carry over to production stacks.
 
 
 %% ===========================================
@@ -529,18 +556,6 @@ $d \in (160,256]$ & 192--256 & 128$\times$32 & 2.3--2.9\,ms & 3--4$\times$ \\
 \end{tabular}
 \end{table}
 
-\section{GeMV Alignment Sweep}
-\label{app:gemv}
-
-Figure~\ref{fig:gemv_alignment} shows GeMV latency ($M{=}1$) with stride-1 sweeps near 4096 for $K$ and $N$.
-The alignment penalty is smaller than GeMM (${\sim}$12\% on $K$, ${\sim}$4\% on $N$), consistent with GeMV being memory-bound.
-
-\begin{figure*}[h]
-\centering
-\includegraphics[width=0.85\textwidth]{figures/fig_gemv_alignment.pdf}
-\caption{GeMV latency ($M{=}1$, stride-1 sweep near 4096).}
-\label{fig:gemv_alignment}
-\end{figure*}
 
 \section{Dimension Distribution of Evaluated Methods}
 \label{app:dims}
