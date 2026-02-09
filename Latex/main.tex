@@ -339,10 +339,10 @@ These penalties compound: a single misaligned dimension can trigger a backend fa
   \end{algorithmic}
   \end{algorithm}
   
-To bridge the gap between compression and alignment, we propose \textbf{GAC} (GPU-Aligned Compression), a paradigm that makes budget allocation system-aware so that fewer parameters translate into real speedup.
+To bridge the gap between compression and alignment, we propose \textbf{GAC} (GPU-Aligned Compression), a paradigm that makes budget allocation system-aware so fewer parameters translate into real speedup.
 GAC wraps any dimension-reducing compressor with a post-processing step, re-selecting dimensions to satisfy alignment constraint.
-Given a model $\mathcal{M}$ with $n$ compressible weights $\mathcal{W}$, a compressor $\mathcal{C}$, and a parameter budget $B {=} (1{-}\rho)\,|\mathcal{W}|$ ($\rho$: compression ratio), GAC produces a 100\%-aligned model via three steps (Figure~\ref{fig:gac_framework};).
-Algorithm~\ref{alg:gac} gives the complete procedure.
+Given a model $\mathcal{M}$ with $n$ compressible weights $\mathcal{W}$, a compressor $\mathcal{C}$, and a parameter budget $B {=} (1{-}\rho)\,|\mathcal{W}|$ ($\rho$: compression ratio), GAC produces a fully aligned model in three steps
+(Figure~\ref{fig:gac_framework}; Algorithm~\ref{alg:gac}).
 
 \subsection{Step 1: Misaligned Compression}
 \label{sec:step1}
@@ -398,97 +398,65 @@ In practice ($n{=}224$, $|C| \approx 15$), the DP runs in under one second on CP
 
 \subsection{Setup}
 
-\paragraph{Model and hardware.}
-Llama-3-8B~\cite{llama3} (8.03B parameters) on NVIDIA A100-80GB, PyTorch 2.9.1, CUDA 12.8, FP16.
-All latency is prefill (compute-bound GeMM); we focus on prefill because it is where alignment most affects performance.
+We evaluate on Llama-3-8B~\cite{llama3} with $\rho=15\%$ using an NVIDIA A100-80GB with PyTorch 2.9.1, CUDA 12.8, FP16.
+We select two representative compressors that alter tensor dimensions in orthogonal ways:
+\textbf{(1)~ASVD}~\citep{asvd}: activation-aware SVD ($W \to A \cdot B$) across all projection weights\footnote{All 32 layers $\times$ 7 projections (Q, K, V, O, gate, up, down) = 224 weights.}.
+\textbf{(2)~LLM-Pruner}~\citep{llmpruner}: coupled structured pruning of MLP weights\footnote{Layers 3--31 (29/32 layers); gate\_proj as pruning root, propagating to up\_proj and down\_proj.}.
+We compare the no compression \emph{baseline} with \emph{Unaligned} (original compression) and \emph{GAC}.
 
-\paragraph{Compression methods.}
-We evaluate two representative methods that change tensor dimensions in orthogonal ways:
-\textbf{(1)~ASVD}~\cite{asvd}: activation-aware SVD across all $n{=}224$ projections ($W {\to} A {\cdot} B$), rank allocated by PPL-calibrated sensitivity; 15\% compression.
-\textbf{(2)~LLM-Pruner}~\cite{llmpruner}: coupled structured pruning of MLP intermediate dimensions across 28/32 layers; 15\% compression.
+\subsection{Implementation}
 
-\paragraph{Strategies.}
-For each compressor: \emph{Unaligned} (default output with irregular dimensions) and \emph{GAC} (dimensions aligned, $d \bmod 8 = 0$).
+GAC is implemented as a lightweight post-processing pass.
+The dimension sweep profiles compression-sensitive kernels\footnote{In Transformers, mainly GeMM, SDPA and GeMV.} latency on the target GPU to build candidate sets (\S\ref{sec:step2}); the DP solver (\S\ref{sec:step3}) then selects aligned dimensions.
+No model architecture changes, no runtime overhead, and no extra inference memory are required---GAC modifies only the dimension allocation before the final compression step.
 
-\paragraph{Metrics.}
-Alignment (\% of projections where $d \bmod 8 = 0$), perplexity (WikiText-2, 2048-token blocks), accuracy (average of PIQA and HellaSwag zero-shot), and prefill latency ($S{=}1024$, batch${=}1$, 30 measurements after warmup).
+\subsection{Preliminary Results}
 
-\subsection{Main Results}
-
-Table~\ref{tab:main_results} presents the end-to-end comparison.
+Table~\ref{tab:main_results} summarizes the end-to-end comparison.
 
 \begin{table}[t]
 \centering
-\caption{Main results on Llama-3-8B (15\% compression, A100-80GB, $S{=}1024$).}
+\caption{Preliminary results on Llama-3-8B ($\rho{=}15\%$). Measured with batch${=}1$, sequence length ${=}1024$.}
 \label{tab:main_results}
 \small
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lcrcc@{}}
+\begin{tabular}{@{}lcrccc@{}}
 \toprule
-\textbf{Method} & \textbf{Align} & \textbf{PPL}$\downarrow$ & \textbf{Acc} & \textbf{Prefill (ms)} \\
+\textbf{Method} & \textbf{Align\%} & \textbf{PPL} & \textbf{PiQA} & \textbf{HSwag} & \textbf{Lat.\,(ms)} \\
 \midrule
-\rowcolor{gray!10} Baseline & 100\% & 6.14 & 0.72 & 99.6 \\
+\rowcolor{gray!10} Baseline & 100\% & 6.14 & 0.80 & 0.50 & 99.6 \\
 \midrule
-ASVD (Unaln.) & 5\% & 34.7 & 0.38 & 100.5\,{\scriptsize\textcolor{cred}{+1\%}} \\
-ASVD (GAC) & 100\% & \textbf{31.3} & 0.39 & \textbf{67.1}\,{\scriptsize\textcolor{cgreen}{$-$33\%}} \\
+ASVD & 5\% & 34.7 & 0.58 & 0.28 & 100.5\,{\scriptsize\textcolor{cred}{(+1\%)}} \\
+ASVD (GAC) & 100\% & 31.3 & 0.57 & 0.26 & 67.1\,{\scriptsize\textcolor{cgreen}{($-$33\%)}} \\
 \midrule
-Pruner (Unaln.) & 83\% & 9.88 & 0.67 & 137.7\,{\scriptsize\textcolor{cred}{+38\%}} \\
-Pruner (GAC) & 100\% & \textbf{9.87} & 0.67 & \textbf{88.0}\,{\scriptsize\textcolor{cgreen}{$-$12\%}} \\
+Pruner & 83\% & 9.88 & 0.80 & 0.49 & 137.7\,{\scriptsize\textcolor{cred}{(+38\%)}} \\
+Pruner (GAC) & 100\% & 9.87 & 0.78 & 0.47 & 88.0\,{\scriptsize\textcolor{cgreen}{($-$12\%)}} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{ASVD: SVD factorization.}
-The unconstrained allocation produces 95\% misaligned dimensions.
-Despite reducing parameters by 15\%, the misaligned model shows \emph{no prefill speedup} (100.5\,ms vs 99.6\,ms baseline)---the compression benefit is entirely consumed by alignment overhead.
-GAC restores alignment to 100\%, yielding a 1.5$\times$ prefill speedup (67.1\,ms, $-$33\% vs baseline).
-Notably, GAC also improves perplexity (31.3 vs 34.7) because the DP rounds sensitive layers \emph{up}, preserving information where it matters most.
+\noindent \textbf{Alignment.}
+ASVD's unconstrained allocation produces 95\% misaligned dimensions, while LLM-Pruner produces 17\% misaligned dimensions (it only prunes MLP, so attention weights stays aligned).
+GAC brings both to 100\%, snapping every dimension to an aligned candidate via the asymmetric DP objective (Eq.~\ref{eq:gac}).
 
-\paragraph{LLM-Pruner: structured pruning.}
-The pruned model retains 83\% alignment (most MLP dimensions happen to be near multiples of 8), yet still suffers a +38\% prefill penalty---demonstrating that even partial misalignment triggers significant overhead.
-GAC eliminates the penalty entirely, achieving a net 12\% speedup over the uncompressed baseline.
-Quality is preserved: PPL and accuracy are nearly identical between Unaligned and GAC variants.
+\noindent \textbf{Accuracy.}
+We report perplexity (WikiText-2) and two downstream tasks (PiQA, HellaSwag; 200 samples each).
+For ASVD, GAC lowers PPL from 34.7 to 31.3 because the DP rounds sensitive layers \emph{up}; downstream scores stay comparable
+(PiQA 0.58$\to$0.51, HellaSwag 0.28$\to$0.26).
+For LLM-Pruner, PPL is nearly identical (9.88 vs.\ 9.87) and downstream accuracy is well preserved (PiQA 0.80$\to$0.78, HellaSwag 0.49$\to$0.47), confirming that aligned re-selection does not sacrifice quality.
 
-\paragraph{Rank allocation visualization.}
-Figure~\ref{fig:gac_ranks} shows per-layer dimension allocations for $W_K$ and $W_V$ projections under three strategies.
-For $W_K$ (top), GAC DP deviates from both Unaligned and Round-to-8: it rounds \emph{up} for high-importance layers (e.g., layers 14--16) and rounds down for insensitive ones, exploiting the asymmetric objective.
-For $W_V$ (bottom), most layers retain the full rank (512), with GAC maintaining alignment at the few compressed layers (18--26).
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig_gac_ranks.pdf}
-\caption{Per-layer rank allocation for $W_K$ (top) and $W_V$ (bottom).}
-\label{fig:gac_ranks}
-\end{figure}
-
-\subsection{Prefill Latency Scaling}
-
-The alignment penalty grows with sequence length.
-Figure~\ref{fig:prefill_scaling} shows LLM-Pruner prefill latency at four sequence lengths for the three configurations.
+\noindent \textbf{Latency.}
+Despite reducing parameters by 15\%, unaligned ASVD shows \emph{no speedup} (100.5\,ms vs.\ 99.6\,ms baseline)---the benefit is consumed by alignment overhead.
+GAC restores a 1.5$\times$ speedup (67.1\,ms, $-$33\%).
+For LLM-Pruner, even 83\% alignment still incurs +38\% latency; GAC eliminates the penalty, achieving 12\% speedup over the \emph{uncompressed} baseline.
+The penalty grows with sequence length (Figure~\ref{fig:prefill_scaling}): from +19\% at $S{=}128$ to +38\% at $S{=}1024$, as longer sequences push GeMMs deeper into the compute-bound regime where alignment (\S\ref{sec:hardware}) dominates.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig_prefill_scaling.pdf}
-\caption{LLM-Pruner prefill latency across sequence lengths.}
+\caption{Llama-3-8B latency across sequence lengths.}
 \label{fig:prefill_scaling}
 \end{figure}
-
-The penalty grows from +19\% ($S{=}128$) to +38\% ($S{=}1024$): longer sequences push GeMMs deeper into the compute-bound regime, where Tensor Core utilization---and thus alignment (\S\ref{sec:hardware})---dominates.
-At $S{=}128$ the model is still partially memory-bound, hiding some misalignment cost; by $S{=}1024$ the penalty is fully exposed.
-GAC maintains ${\sim}$12\% speedup over the \emph{uncompressed} baseline for $S \geq 256$, showing that aligned compression delivers both smaller models and faster inference.
-
-\subsection{Discussion}
-
-\paragraph{Why compression does not always speed up inference.}
-ASVD decomposes each weight $W$ into two smaller matrices $A$ and $B$, halving FLOPs per projection but doubling the number of GeMM calls.
-When dimensions are misaligned, each GeMM triggers Tier~2/3 kernels (Table~\ref{tab:cublas_tiers}) with lower throughput, negating the FLOP reduction entirely---hence the +1\% ``speedup'' of unaligned ASVD.
-LLM-Pruner reduces MLP intermediate dimensions but produces sizes like 5931, 6054, and 6778, which fall outside cuBLAS's optimal kernel range.
-Even the 83\% naturally-aligned dimensions cannot prevent the +38\% penalty because the remaining 17\% misaligned layers dominate the critical path.
-
-\paragraph{GAC as a general paradigm.}
-GAC operates at \emph{compression time}, requiring no runtime overhead, no architecture changes, and no extra memory---the DP runs in $<$1\,s on CPU.
-The dimension sweep is hardware-specific: on A100, it identifies cliffs at SDPA template boundaries and cuBLAS kernel transitions; on H100 with TMA and FA3~\cite{flashattention3}, the cliffs shift accordingly.
-For compression libraries, GAC adds negligible computation as a post-processing pass; for serving systems, it eliminates the need for runtime padding (TensorRT~\cite{tensorrt}) or dimension rejection (vLLM~\cite{vllm}).
 
 
 %% ===========================================

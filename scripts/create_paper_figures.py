@@ -878,25 +878,9 @@ def fig_alignment_sweep_compact(csv_path='results/alignment_sweep.csv'):
 
 
 def fig_gac_ranks(ranks_dir='results/gac_allocation'):
-    """Per-layer rank comparison: unaligned vs round8 vs gac_dp.
-
-    2-panel (k_proj, v_proj), single-column width.
-    """
-    ideal_path = Path(ranks_dir) / 'ideal_float_ranks.json'
-    if not ideal_path.exists():
-        print("Skipping fig_gac_ranks: no ideal_float_ranks.json")
-        return
-
-    with open(ideal_path) as f:
-        ideal_raw = json.load(f)
-
-    # Parse ideal ranks (list of dicts with layer, proj, ideal_rank)
-    ideal = {}
-    for entry in ideal_raw:
-        ideal[(entry['layer'], entry['proj'])] = entry['ideal_rank']
-
+    """Per-layer dimension comparison: unaligned vs GAC (k_proj only)."""
     strategies = {}
-    for name in ['unaligned', 'round8', 'gac_dp']:
+    for name in ['unaligned', 'gac_dp']:
         p = Path(ranks_dir) / f'ranks_{name}.json'
         if p.exists():
             with open(p) as f:
@@ -906,60 +890,44 @@ def fig_gac_ranks(ranks_dir='results/gac_allocation'):
         print("Skipping fig_gac_ranks: no rank files")
         return
 
-    fig, axes = plt.subplots(2, 1, figsize=(3.3, 2.6), sharex=True,
-                              gridspec_kw={'hspace': 0.15, 'height_ratios': [1.4, 1]})
+    fig, ax = plt.subplots(1, 1, figsize=(3.3, 1.5))
 
     layers = list(range(32))
 
     style = {
-        'unaligned': (COLORS['misaligned'], 0.8, '-', 1.5, 'Unaligned'),
-        'round8': (COLORS['accent'], 0.8, '--', 1.5, 'Round-to-8'),
-        'gac_dp': (COLORS['primary'], 1.2, '-', 3, 'GAC DP'),
+        'unaligned': (COLORS['misaligned'], 0.8, '-', 1.5, 'ASVD'),
+        'gac_dp': (COLORS['primary'], 1.2, '-', 3, 'GAC'),
     }
 
-    for ax, proj_name, panel_title in [(axes[0], 'k_proj', '$W_K$'),
-                                        (axes[1], 'v_proj', '$W_V$')]:
-        # Ideal float ranks
-        ideal_ranks = [ideal.get((l, proj_name), None) for l in layers]
-        if ideal_ranks[0] is not None:
-            ax.plot(layers, ideal_ranks, color=COLORS['neutral'], linewidth=0.8,
-                    linestyle=':', alpha=0.5, label='Ideal', zorder=1)
+    for name, (color, lw, ls, zorder, label) in style.items():
+        if name not in strategies:
+            continue
+        ranks = []
+        for l in layers:
+            key = f"model.layers.{l}.self_attn.k_proj"
+            if key in strategies[name]:
+                ranks.append(strategies[name][key][0])
+            else:
+                ranks.append(None)
+        if ranks[0] is not None:
+            ax.plot(layers, ranks, color=color, linewidth=lw,
+                    linestyle=ls, alpha=0.85, label=label, zorder=zorder)
 
-        for name, (color, lw, ls, zorder, label) in style.items():
-            if name not in strategies:
-                continue
-            ranks = []
-            for l in layers:
-                key = f"model.layers.{l}.self_attn.{proj_name}"
-                if key in strategies[name]:
-                    ranks.append(strategies[name][key][0])
-                else:
-                    ranks.append(None)
-            if ranks[0] is not None:
-                ax.plot(layers, ranks, color=color, linewidth=lw,
-                        linestyle=ls, alpha=0.85, label=label, zorder=zorder)
+    ax.set_ylabel('Dimension', fontsize=7)
+    ax.set_xlabel('Layer', fontsize=7)
+    ax.tick_params(labelsize=6)
+    ax.text(0.02, 0.92, '$W_K$', transform=ax.transAxes,
+            fontsize=7, fontweight='bold', va='top')
+    ax.set_ylim(40, 550)
+    ax.set_xticks([0, 4, 8, 12, 16, 20, 24, 28, 31])
+    ax.legend(fontsize=5, loc='best', framealpha=0.8,
+              ncol=2, handletextpad=0.3, columnspacing=0.6, borderpad=0.2)
 
-        ax.set_ylabel('Rank', fontsize=7)
-        ax.tick_params(labelsize=6)
-        label_y = 0.92 if proj_name == 'k_proj' else 0.72
-        ax.text(0.02, label_y, panel_title, transform=ax.transAxes,
-                fontsize=7, fontweight='bold', va='top')
-        if proj_name == 'k_proj':
-            ax.set_ylim(40, 550)
-        else:
-            ax.set_ylim(350, 530)
-
-    axes[1].set_xlabel('Layer', fontsize=7)
-    for ax in axes:
-        ax.legend(fontsize=5, loc='best', framealpha=0.8,
-                  ncol=2, handletextpad=0.3, columnspacing=0.6, borderpad=0.2)
-    axes[1].set_xticks([0, 4, 8, 12, 16, 20, 24, 28, 31])
-
-    fig.subplots_adjust(left=0.13, right=0.97, top=0.95, bottom=0.13, hspace=0.12)
+    fig.subplots_adjust(left=0.13, right=0.97, top=0.95, bottom=0.2)
     fig.savefig(OUTPUT_DIR / 'fig_gac_ranks.pdf')
     fig.savefig(OUTPUT_DIR / 'fig_gac_ranks.png')
     plt.close()
-    print("Saved: fig_gac_ranks.pdf (per-layer rank comparison)")
+    print("Saved: fig_gac_ranks.pdf (per-layer dimension comparison, k_proj only)")
 
 
 def fig_prefill_scaling(results_path='results/llmpruner_llama3_v2/results.json'):
@@ -991,7 +959,7 @@ def fig_prefill_scaling(results_path='results/llmpruner_llama3_v2/results.json')
 
     bars_base = ax.bar(x - width, baseline_vals, width, label='Baseline',
                        color=COLORS['neutral'], alpha=0.7, edgecolor='white', linewidth=0.5)
-    bars_unal = ax.bar(x, unaligned_vals, width, label='Unaligned',
+    bars_unal = ax.bar(x, unaligned_vals, width, label='LLM-Pruner',
                        color=COLORS['misaligned'], alpha=0.45, edgecolor='white', linewidth=0.5)
     bars_gac = ax.bar(x + width, gac_vals, width, label='GAC',
                       color=COLORS['success'], alpha=0.45, edgecolor='white', linewidth=0.5)
