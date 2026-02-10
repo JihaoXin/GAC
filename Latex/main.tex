@@ -132,6 +132,7 @@ We term this phenomenon \textbf{dimensional misalignment}.
 \caption{GEMM: $Y{=}X{\cdot}W$ with $X{\in}\mathbb{R}^{M \times K}$,
 $W{\in}\mathbb{R}^{K \times N}$.}
 \label{fig:gemm_dims}
+\vspace{-0.2cm}
 \end{figure}
 
 To see why, consider the one of the core operators in LLMs, GEMM (General Matrix Multiply) $Y{=}X{\cdot}W$ (Figure~\ref{fig:gemm_dims}), with sequence dimension~$M$, inner dimension~$K$, and output dimension~$N$.
@@ -255,12 +256,14 @@ In this section, we exemplify this issue via PyTorch's \textbf{SDPA} (Scaled Dot
 where $Q$, $K$, $V$ are the query, key, and value matrices and $d_k$ is the per-head dimension.
 When one calls the SDPA API \footnote{\texttt{torch.nn.functional.scaled\_dot\_product\_attention(Q, K, V)}} , PyTorch may select an optimized implementation (e.g., FlashAttention) or fall back to a naive eager implementation (the ``Math'' backend).
 
-We measured SDPA latency with inputs $Q,K,V$ of shape $(B, S, H, d)$: batch $B{=}4$, sequence length $S{=}2048$, number of heads $H{=}32$, and we sweep the per-head dimension $d$ from 64 to 256 (Table~\ref{tab:fa2_templates}).
+We measured SDPA latency with inputs $Q,K,V$ of shape $(B, S, H, d)$: batch $B{=}4$, sequence length $S{=}2048$, number of heads $H{=}32$, and we sweep the per-head dimension $d$ from 64 to 256.
 We observed a staircase pattern (Figure~\ref{fig:sdpa_latency}).
 First, multiples of 8 are faster: e.g., $d{=}129$ incurs $\sim$90\% higher latency than $d{=}128$.
 Profiling shows that PyTorch uses FlashAttention only when $d \bmod 8 = 0$; otherwise it falls back to the Math kernel.
-Second, among 8-aligned dimensions, $d \bmod 32 = 0$ forms another performance boundary: FlashAttention-2 uses dimension-specific templates, with tile sizes changing every 32 dimensions.
-In the figure, alternating background shades denote template regions; labels such as ``$t{=}96$, $128{\times}64$'' indicate the template size $t$ and the $B_r {\times} B_c$ tile shape for that region.
+Second, among 8-aligned dimensions, latency rises in a staircase at every 32-dimension boundary.
+This is caused by FlashAttention-2's template mechanism: FA2 selects the smallest template $t \geq d$ and assigns a tile shape $B_r {\times} B_c$ accordingly (Table~\ref{tab:fa2_templates}).
+Crossing a template boundary (e.g., $d{=}128 \to 129$) halves $B_c$ and roughly doubles latency.
+In Figure~\ref{fig:sdpa_latency}, alternating shades mark template regions; labels such as ``$t{=}96$, $128{\times}64$'' show the active template and tile shape.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/fig2_sdpa_latency.pdf}
@@ -386,42 +389,42 @@ These penalties compound: a single misaligned dimension can trigger a backend fa
   \label{alg:gac}
   \small
   \begin{algorithmic}[1]
-  \Require Model $\mathcal{M}$, compressor $\mathcal{C}$, budget $B$
+  \Require Model $\mathcal{M}$, compressor $\mathcal{F}$, budget $B$, unit $u$
   \Ensure Aligned dimensions $\{d_i\}_{i=1}^n$ with $d_i \in C_i$
-  \Statex \textit{Phase 1: Misaligned Compression}
-  \State Apply $\mathcal{C}(\mathcal{M})$ $\to$ misaligned dims $\{d_i^*\}$, scores $\{s_i\}$
-  \State Profile GeMM/SDPA $\to$ constraints (\S\ref{sec:analysis})
-  \Statex \textit{Phase 2: Candidate Generation}
+  \Statex \textit{Step 1: Unconstrained Compression}
+  \State $\{d_i^*\}, \{s_i\} \gets \mathcal{F}(\mathcal{M}, B)$ \Comment{misaligned dims \& scores}
+  \Statex \textit{Step 2: Dimension Sweep}
   \For{each weight $i = 1, \ldots, n$}
-    \State Sweep dims near $d_i^*$; measure latency
-    \State $C_i \gets$ dims avoiding perf.\ cliffs
+    \State Sweep aligned dims near $d_i^*$ using heuristics constraints from \S\ref{sec:analysis}
+    \State $C_i \gets$ candidate aligned dims avoiding performance cliffs
   \EndFor
-  \Statex \textit{Phase 3: Multi-Choice Knapsack DP}
-  \State $D[0..n][0..B] \gets -\infty$;\; $D[0][0] \gets 0$
+  \Statex \textit{Step 3: Constrained Optimization (Knapsack DP)}
+  \State $B' \gets B / u$ \Comment{quantize budget}
+  \State $D[0..n][0..B'] \gets -\infty$;\; $D[0][0] \gets 0$
   \For{$i = 1$ to $n$}
     \For{each $d_{ij} \in C_i$}
-      \State $v_{ij} \gets s_i \cdot (|W_i(d_{ij})| {-} |W_i^*|)$;\; $w_{ij} \gets |W_i(d_{ij})|$
-      \For{$b = w_{ij}$ to $B$}
-        \State $D[i][b] \gets \max\!\bigl(D[i][b],\; D[i{-}1][b{-}w_{ij}] + v_{ij}\bigr)$
+      \State $v_{ij} \gets s_i \cdot (|W_i(d_{ij})| {-} |W_i^*|)$;\; $w'_{ij} \gets |W_i(d_{ij})| / u$
+      \For{$b = w'_{ij}$ to $B'$}
+        \State $D[i][b] \gets \max\!\bigl(D[i][b],\; D[i{-}1][b{-}w'_{ij}] + v_{ij}\bigr)$
       \EndFor
     \EndFor
   \EndFor
-  \State Backtrack from $\arg\max_b D[n][b]$
+  \State Backtrack from $\arg\max_b D[n][b]$ to get $\{d_i\}$
   \State \Return $\{d_i\}$
   \end{algorithmic}
   \end{algorithm}
   
 To bridge the gap between compression and alignment, we propose \textbf{GAC} (GPU-Aligned Compression), a paradigm that makes budget allocation system-aware so fewer parameters translate into real speedup.
 GAC wraps any dimension-reducing compressor with a post-processing step, re-selecting dimensions to satisfy alignment constraint.
-Given a model $\mathcal{M}$ with $n$ compressible weights $\mathcal{W}$, a compressor $\mathcal{C}$, and a parameter budget $B {=} (1{-}\rho)\,|\mathcal{W}|$ ($\rho$: compression ratio), GAC produces a fully aligned model in three steps
+Given a model $\mathcal{M}$ with $n$ compressible weights $\mathcal{W}$, a compressor $\mathcal{F}$, and a parameter budget $B {=} (1{-}\rho)\,|\mathcal{W}|$ ($\rho$: compression ratio), GAC produces a fully aligned model in three steps
 (Figure~\ref{fig:gac_framework}; Algorithm~\ref{alg:gac}).
 
 \subsection{Step 1: Misaligned Compression}
 \label{sec:step1}
 
-We first apply $\mathcal{C}$ to $\mathcal{M}$ without alignment constraints.
-$\mathcal{C}$ can be any established dimension-reducing compressor---e.g., ASVD~\cite{asvd} (SVD factorization) or LLM-Pruner~\cite{llmpruner} (structured pruning).
-Internally, $\mathcal{C}$ computes a per-weight importance score $s_i$ using one of the proxies in Table~\ref{tab:importance_scores} (e.g., activation magnitude for ASVD, gradient-based Taylor expansion for LLM-Pruner), then allocates dimensions $\{d_i^*\}$ proportionally: higher $s_i$ retains a larger $d_i^*$.
+We first apply $\mathcal{F}$ to $\mathcal{M}$ without alignment constraints.
+$\mathcal{F}$ can be any established dimension-reducing compressor---e.g., ASVD~\cite{asvd} (SVD factorization) or LLM-Pruner~\cite{llmpruner} (structured pruning).
+Internally, $\mathcal{F}$ computes a per-weight importance score $s_i$ using one of the proxies in Table~\ref{tab:importance_scores} (e.g., activation magnitude for ASVD, gradient-based Taylor expansion for LLM-Pruner), then allocates dimensions $\{d_i^*\}$ proportionally: higher $s_i$ retains a larger $d_i^*$.
 Because $s_i$ and the resulting $\{d_i^*\}$ are continuous, the compressed model is \emph{misaligned}.
 
 \subsection{Step 2:Dimension Sweep}
@@ -457,8 +460,15 @@ The recurrence is:
 \[
 D[i][b] = \max_{j} \left\{ D[i{-}1][b - w_{ij}] + v_{ij} \right\}
 \]
-with complexity $O(n \cdot |C| \cdot B')$ where $B'$ is the quantized budget.
-In practice ($n{=}224$, $|C| \approx 15$), the DP runs in under one second on CPU---negligible compared to the compression itself.
+with complexity $O(n \cdot |C_{\max}| \cdot B')$, where $n$ is the number of weight matrices, $|C_{\max}| = \max_i |C_i|$ the largest candidate set, and $B'$ the quantized budget.
+
+\noindent \textbf{Budget quantization.}
+Na\"ively, the DP table has $B$ entries equal to the raw parameter budget, which can reach billions (e.g., $0.8 \times 100 \times 1024^2 \approx 10^8$ for 100 matrices of size $1024{\times}1024$ at $\rho{=}20\%$).
+However, dimension reduction has a \emph{minimum cost unit}: pruning one column of a $[M,N]$ matrix by 1 adds or removes $M$ parameters.
+If we further constrain dimensions to multiples of~8, the minimum unit becomes $u = 8 \cdot M_{\min}$, where $M_{\min}$ is the smallest row count across all weights.
+We quantize costs and budget by $u$: $w'_{ij} = w_{ij} / u$, $B' = B / u$.
+This reduces the DP table size dramatically---in the example above, $u{=}8{\times}1024{=}8192$ shrinks the table from ${\sim}10^8$ to ${\sim}12{,}500$ entries, a reduction of $8000{\times}$.
+In practice, the DP runs in under one second on CPU---negligible compared to the compression itself.
 
 
 
@@ -538,16 +548,10 @@ The penalty grows with sequence length (Figure~\ref{fig:prefill_scaling}): from 
 \section{Related Work}
 \label{sec:related}
 
-\noindent \textbf{LLM compression.}
-SVD-based methods~\cite{asvd,svdllm2024,palu,fwsvd2022,gfwsvd2025} allocate per-layer dimensions via importance scores, producing irregular dimensions as a by-product.
-Structured pruning~\cite{sparsegpt,wanda,llmpruner, h2o,quest,pyramidkv} similarly alter tensor shapes without considering hardware alignment.
-All dimension-altering compressors are \emph{hardware-agnostic}: they optimize accuracy under a size budget but ignore how chosen dimensions interact with the GPU execution stack (\S\ref{sec:analysis}).
-GAC is complementary---it post-processes any such compressor's output to restore alignment.
-
-\noindent \textbf{Hardware-aware optimization.}
-HALP~\cite{halp2021} formulates CNN pruning as latency-budgeted optimization using end-to-end timing; HALOC~\cite{haloc2023} uses a differentiable latency predictor for CNN low-rank compression.
-Both treat latency as a \emph{black-box} signal---they optimize aggregate runtime without isolating \emph{why} certain dimensions are slow, are tied to specific architectures, and offer no parameter-budget guarantee.
-GAC instead identifies root causes (framework dispatch, kernel selection, and hardware tile alignment; \S\ref{sec:analysis}) and constrains the search space directly, guaranteeing both alignment and the parameter budget.
+\noindent \textbf{System-aware compression.}
+Dimension-reducing compressors such as SVD factorization~\cite{asvd,svdllm2024,palu}, structured pruning~\cite{sparsegpt,wanda,llmpruner}, and KV eviction~\cite{h2o,quest,pyramidkv} optimize accuracy under a size budget but ignore how the resulting dimensions interact with GPU execution.
+HALP~\cite{halp2021} and HALOC~\cite{haloc2023} incorporate hardware awareness into CNN compression, but treat latency as a \emph{black-box} signal: they optimize aggregate runtime without isolating \emph{why} certain dimensions are slow, and are tied to specific CNN architectures with no parameter-budget guarantee.
+GAC instead identifies root causes at three levels (framework dispatch, kernel selection, hardware tile alignment; \S\ref{sec:analysis}) and constrains dimension selection directly, complementing any upstream compressor while guaranteeing both alignment and parameter budget.
 
 \noindent \textbf{Serving-side mitigations.}
 Serving systems handle misalignment \emph{reactively}.
