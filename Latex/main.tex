@@ -73,7 +73,7 @@
 
 \begin{abstract}
 Post-training compression reduces LLM parameter counts but often produces irregular tensor dimensions that degrade GPU performance---a phenomenon we call \emph{dimensional misalignment}.
-We present a full-stack analysis tracing root causes at three levels: framework (e.g. PyTorch backend dispatch), library (e.g. cuBLAS kernel selection), and hardware (e.g. Tensor Core tile and L2 Cache sector).
+We present a full-stack analysis tracing root causes at three levels: framework (e.g., PyTorch backend dispatch), library (e.g., cuBLAS kernel selection), and hardware (e.g., Tensor Core tile and L2 Cache sector).
 The key insight is that model inference becomes slower due to the resulting dimensions being incompatible with the GPU execution stack.
 For example, ASVD-compressed Llama-3-8B has 15\% fewer parameters yet runs no faster than the uncompressed baseline, because 95\% of its dimensions are misaligned.
 We propose \textbf{GAC} (GPU-Aligned Compression), a new compression paradigm that wraps any dimension-reducing compressor and re-selects hardware-aligned dimensions via multi-choice knapsack optimization under the same parameter budget.
@@ -93,8 +93,8 @@ On Llama-3-8B with ASVD and LLM-Pruner, GAC achieves 100\% alignment, recovering
 \section{Introduction}
 \label{sec:intro}
 
-Large Language Models (LLMs) deliver strong capabilities, but their scale hinders deployment~\cite{llama3}.
-Post-training compression reduces model size and can be categorized into three families: \emph{quantization}~\cite{gptq,awq}, \emph{sparsification}~\cite{sparsegpt,wanda}, and \emph{dimension reduction}~\cite{asvd,palu,llmpruner,h2o,pyramidkv}.
+Large Language Models (LLMs) deliver strong capabilities, but their scale hinders deployment~\citep{llama3}.
+Post-training compression reduces model size and can be categorized into three families: \emph{quantization}~\citep{gptq,awq}, \emph{sparsification}~\citep{sparsegpt,wanda}, and \emph{dimension reduction}~\citep{asvd,palu,llmpruner,h2o,pyramidkv}.
 Quantization and sparsification preserve tensor shapes and are therefore compatible with existing GPU kernels.
 Dimension reduction, however, alters the tensor shapes often producing \emph{irregular} dimensions (e.g., dimension reduced from 128 to 107), which conflict with GPU execution primitives---Tensor Core tiles, cuBLAS kernels, and framework backend selection---causing a counterintuitive outcome: \emph{models with \textbf{fewer} parameters run \textbf{slower} than uncompressed ones}.
 We term this phenomenon \textbf{dimensional misalignment}.
@@ -129,24 +129,24 @@ We term this phenomenon \textbf{dimensional misalignment}.
   \draw[dim] (7.4,3.0) -- (10.0,3.0) node[midway, dlabel] {$N$};
 \end{tikzpicture}%
 }
-\caption{GEMM: $Y{=}X{\cdot}W$ with $X{\in}\mathbb{R}^{M \times K}$,
+\caption{GeMM: $Y{=}X{\cdot}W$ with $X{\in}\mathbb{R}^{M \times K}$,
 $W{\in}\mathbb{R}^{K \times N}$.}
-\label{fig:gemm_dims}
+\label{fig:GeMM_dims}
 \vspace{-0.2cm}
 \end{figure}
 
-To see why, consider the one of the core operators in LLMs, GEMM (General Matrix Multiply) $Y{=}X{\cdot}W$ (Figure~\ref{fig:gemm_dims}), with sequence dimension~$M$, inner dimension~$K$, and output dimension~$N$.
+To see why, consider one of the core operators in LLMs, GeMM (General Matrix Multiply) $Y{=}X{\cdot}W$ (Figure~\ref{fig:GeMM_dims}), with sequence dimension~$M$, inner dimension~$K$, and output dimension~$N$.
 Three compression methods each target a different axis:
-\textbf{(i)}~low-rank factorization replaces $W$ with two factors $A{\cdot}B$, introducing a reduced rank $r$ as the inner dimension of two smaller GEMMs~\cite{asvd,palu,svdllm2024};
-\textbf{(ii)}~structured pruning removes neurons or attention heads, shrinking~$N$~\cite{llmpruner,sparsegpt,wanda};
-\textbf{(iii)}~token/KV eviction drops sequence entries, reducing~$M$~\cite{h2o,pyramidkv}.
-All three optimize \emph{size vs.\ accuracy} without checking whether the resulting dimensions satisfy GPU alignment constraints (e.g.\ $d \bmod 8 = 0$).
+\textbf{(i)}~low-rank factorization replaces $W$ with two factors $A{\cdot}B$, introducing a reduced rank $r$ as the inner dimension of two smaller GeMMs~\citep{asvd,palu,svdllm2024};
+\textbf{(ii)}~structured pruning removes neurons or attention heads, shrinking~$N$~\citep{llmpruner};
+\textbf{(iii)}~token/KV eviction drops sequence entries, reducing~$M$~\citep{h2o,pyramidkv}.
+All three optimize \emph{size vs.\ accuracy} without checking whether the resulting dimensions satisfy GPU alignment constraints (e.g., $d \bmod 8 = 0$).
 The problem is pervasive: ASVD produces 95\% misaligned dimensions, and even LLM-Pruner---whose pruning granularity is relatively coarse---still leaves 17\% of weights misaligned (Table~\ref{tab:main_results}).
-Prior hardware-aware methods~\cite{halp2021,haloc2023} treat latency as a black-box signal, tying solutions to specific CNN architectures without isolating root causes or providing parameter-budget guarantees.
+Prior hardware-aware methods~\citep{halp2021,haloc2023} treat latency as a black-box signal, tying solutions to specific CNN architectures without isolating root causes or providing parameter-budget guarantees.
 
 We propose \textbf{GAC} (GPU-Aligned Compression), a compression \emph{paradigm} that imposes hardware alignment constraints on any dimension-reducing compressor.
 GAC first identifies \emph{why} certain dimensions are slow via a full-stack analysis (\S\ref{sec:analysis}), then constrains a multi-choice knapsack optimizer to re-select aligned dimensions under the same parameter budget.
-GACis a compressor-agnostic framework that restores speed without changing the upstream compressor's design.
+GAC is a compressor-agnostic framework that restores speed without changing the upstream compressor's design.
 
 \noindent \textbf{Contributions.}\\
 \textbf{(1)}~We identify the \emph{dimensional misalignment} problem and demonstrate its prevalence across compressors (\S\ref{sec:misalignment}).\\
@@ -171,7 +171,7 @@ GACis a compressor-agnostic framework that restores speed without changing the u
 Existing LLM compression aims to preserve accuracy under a given compression ratio $\rho$.
 Formally, given the set of pretrained parameters $\mathcal{W}$, we seek a compressed set $\mathcal{W}'$ that minimizes expected loss subject to the size constraint:
 \begin{equation}
-\min_{\mathcal{W}'} \; \mathbb{E}_{(x,y)\sim\mathcal{D}}[\mathcal{L}(\mathcal{W}'; x, y)] \quad \text{s.t.} \quad 1-|\mathcal{W}'|/|\mathcal{W}| \leq \rho.
+\min_{\mathcal{W}'} \; \mathbb{E}_{(x,y)\sim\mathcal{D}}[\mathcal{L}(\mathcal{W}'; x, y)] \quad \text{s.t.} \quad 1-|\mathcal{W}'|/|\mathcal{W}| \geq \rho.
 \label{eq:compression_target}
 \end{equation}
 Here $\mathcal{D}$ is the data distribution, $\mathcal{L}$ is the loss, $|\mathcal{W}'|$ and $|\mathcal{W}|$ denote total parameter counts. We denote $B = (1-\rho)|\mathcal{W}|$ as the parameter budget.
@@ -179,15 +179,15 @@ Here $\mathcal{D}$ is the data distribution, $\mathcal{L}$ is the loss, $|\mathc
 Different parameters have different compression sensitivities, e.g., early and late layers are often more critical than middle layers---so budget cannot be allocated uniformly.
 Existing methods proceed in two steps.
 First, for each parameter $W_i$, compute an \textbf{importance score} $s_i$ using a proxy (Table~\ref{tab:importance_scores}); a higher $s_i$ reflects higher sensitivity thus should retain more parameters in $W_i$.
-Second, allocate the budget $B$ by assigning each $W_i$ a dimension $d_i$ thus that more important $W_i$ receive larger $d_i$:
+Second, allocate the budget $B$ by assigning each $W_i$ a dimension $d_i$ so that more important $W_i$ receive larger $d_i$:
 \begin{equation}
 \{d_i\} = \arg\max_{\{d_i\}} \sum_i s_i \cdot |W_i| \quad \text{s.t.} \quad |\mathcal{W}'| \leq B, \quad d_i \geq 0.
 \label{eq:budget_allocation}
 \end{equation}
 Here $d_i$ is the compressed dimension (e.g., inner dimension or output width, varies by compression method), $|W_i|$ is the parameter count given dimension $d_i$, $|\mathcal{W}'| = \sum_i |W_i|$ is the total parameter count of the compressed model, and $B$ is the parameter budget.
-Because $s_i$ and the optimum $\{d_i\}$ are continuous, the resulting dimensions are typically \emph{irregular} (e.g., 107, 108, 109) and often violate GPU alignment requirements (e.g.\ $d \bmod 8 = 0$), triggering backend fallbacks and kernel switches that erase the expected speedup from fewer parameters and FLOPs.
+Because $s_i$ and the optimum $\{d_i\}$ are continuous, the resulting dimensions are typically \emph{irregular} (e.g., 107, 108, 109) and often violate GPU alignment requirements (e.g., $d \bmod 8 = 0$), triggering backend fallbacks and kernel switches that erase the expected speedup from fewer parameters and FLOPs.
 
-We demonstrate the dimensional misalignment problem with a real-world example: PaLU~\cite{palu}.
+We demonstrate the dimensional misalignment problem with a real-world example: PaLU~\citep{palu}.
 We use \textbf{8-alignment} ($d \bmod 8 = 0$) as an example of alignment constraints. When dimensions are not 8-aligned, latency can increase by up to 90\% (Figure~\ref{fig:sdpa_latency}); we detail this analysis in \S\ref{sec:analysis}.
 Figure~\ref{fig:palu_dist} shows that a large fraction of layers end up misaligned (e.g., 78\% in this setup).
 For generality, we summarize the mainstream importance score proxies into four categories (Table~\ref{tab:importance_scores}).
@@ -201,7 +201,7 @@ We empirically measure unconstrained dimension allocation on Llama-3-8B at $\rho
 
 \begin{table}[t]
 \centering
-\caption{Mainstream importance score for budget allocation.}
+\caption{Mainstream importance scores for budget allocation.}
 \label{tab:importance_scores}
 \small
 \setlength{\tabcolsep}{2.5pt}
@@ -209,10 +209,10 @@ We empirically measure unconstrained dimension allocation on Llama-3-8B at $\rho
 \toprule
 \textbf{Method} & \textbf{Score} & \textbf{Intuition} & \textbf{Works} \\
 \midrule
-Magnitude & $\|W_i\|_F$ & Weight norm & SVD-LLM~\cite{svdllm2024} \\
-Activation & $\|X_i\|_F$ & Input mag.\  & ASVD~\cite{asvd} \\
-Gradient & $\left|\frac{\partial \mathcal{L}}{\partial h_i} \cdot h_i\right|$ & Taylor exp.\  & \cite{taylor_pruning} \\
-Fisher & $\mathrm{tr}(\mathbf{F}_i)$ & Loss curvature & PaLU \cite{palu} \\
+Magnitude & $\|W_i\|_F$ & Weight norm & SVD-LLM~\citep{svdllm2024} \\
+Activation & $\|X_i\|_F$ & Input mag.\  & ASVD~\citep{asvd} \\
+Gradient & $\left|\frac{\partial \mathcal{L}}{\partial h_i} \cdot h_i\right|$ & Taylor exp.\  & \citep{taylor_pruning} \\
+Fisher & $\mathrm{tr}(\mathbf{F}_i)$ & Loss curvature & PaLU \citep{palu} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -254,7 +254,7 @@ In this section, we exemplify this issue via PyTorch's \textbf{SDPA} (Scaled Dot
 \mathrm{Attention}(Q,K,V) = \mathrm{softmax}(Q K^\top / \sqrt{d_k}) V
 \end{equation}
 where $Q$, $K$, $V$ are the query, key, and value matrices and $d_k$ is the per-head dimension.
-When one calls the SDPA API \footnote{\texttt{torch.nn.functional.scaled\_dot\_product\_attention(Q, K, V)}} , PyTorch may select an optimized implementation (e.g., FlashAttention) or fall back to a naive eager implementation (the ``Math'' backend).
+When one calls the SDPA API\footnote{\texttt{torch.nn.functional.scaled\_dot\_product\_attention(Q, K, V)}} , PyTorch may select an optimized implementation (e.g., FlashAttention) or fall back to a naive eager implementation (the ``Math'' backend).
 
 We measured SDPA latency with inputs $Q,K,V$ of shape $(B, S, H, d)$: batch $B{=}4$, sequence length $S{=}2048$, number of heads $H{=}32$, and we sweep the per-head dimension $d$ from 64 to 256.
 We observed a staircase pattern (Figure~\ref{fig:sdpa_latency}).
@@ -293,10 +293,10 @@ $d \in (160,256]$ & 192--256 & 128$\times$32 & 2.3--2.9\,ms & 3--4$\times$ \\
 \subsection{Library Layer}
 \label{sec:library}
 
-Linear algebra is dispatched to libraries (e.g., cuBLAS), where the same GEMM can be served by different kernels depending on dimensions.
-We examine this via GEMM $C {=} A {\cdot} B$ with $A \in \mathbb{R}^{M \times K}$ and $B \in \mathbb{R}^{K \times N}$.
+Linear algebra is dispatched to libraries (e.g., cuBLAS), where the same GeMM can be served by different kernels depending on dimensions.
+We examine this via GeMM $C {=} A {\cdot} B$ with $A \in \mathbb{R}^{M \times K}$ and $B \in \mathbb{R}^{K \times N}$.
 We measured GeMM latency with two of $(M, N, K)$ fixed at typical LLM sizes ($M{=}N{=}2048$, $K{=}128$) and the third dimension swept from 50\% to 100\%.
-Figure~\ref{fig:gemm_alignment} shows the results.
+Figure~\ref{fig:GeMM_alignment} shows the results.
 First, $K$ and $N$ exhibit a clear alignment effect: when the swept dimension satisfies $d \bmod 8 = 0$, latency is lower (e.g., $K$ aligned $\sim$20\,$\mu$s vs.\ misaligned 22--26\,$\mu$s, up to 30\% penalty).
 Second, $M$ and $N$ show \emph{kernel-switching cliffs}: at certain boundaries (e.g., $M{=}1728 \to 1729$), latency jumps (e.g., $\sim$30\%).
 We profiled with Nsight Compute to explain this: when $d \bmod 8 = 0$, cuBLAS invokes its native optimized kernel; otherwise it uses a CUTLASS-generated kernel, which is further divided into align2 (fetching 2 elements at a time) or align1.
@@ -311,7 +311,7 @@ GeMV ($M{=}1$) exhibits a similar but smaller penalty (${\sim}$12\% on $K$, ${\s
 \end{figure}
 \begin{table}[t]
 \centering
-\caption{cuBLAS GEMM kernel tiers (Nsight Compute).}
+\caption{cuBLAS GeMM kernel tiers (Nsight Compute).}
 \label{tab:cublas_tiers}
 \small
 \setlength{\tabcolsep}{2pt}
@@ -330,9 +330,9 @@ GeMV ($M{=}1$) exhibits a similar but smaller penalty (${\sim}$12\% on $K$, ${\s
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{figures/fig_gemm_alignment.pdf}
+\includegraphics[width=\textwidth]{figures/fig_GeMM_alignment.pdf}
 \caption{GeMM latency with dimension sweep.}
-\label{fig:gemm_alignment}
+\label{fig:GeMM_alignment}
 \end{figure*}
 
 \subsection{Hardware Layer}
@@ -341,13 +341,13 @@ Beyond framework and library dispatch, misaligned dimensions also cause ineffici
 We use Nsight Compute profiling to isolate two mechanisms.
 \textbf{(1)~Tensor Core}: The A100 MMA instruction \texttt{mma.m16n8k16} processes tiles of $16{\times}8{\times}16$ fp16 elements; dimensions not divisible by these tile sizes leave partial tiles underutilized.
 A throughput sweep near $K,N{=}4096$ confirms: aligned dimensions reach 160--175 TFLOPS while misaligned ones drop to 50--110 TFLOPS, with period-16 in $K$ and period-8 in $N$ matching the tile shape (Figure~\ref{fig:hw_alignment}a,b).
-\textbf{(2)~Memory}: The A100 L2 cache operates in 32-byte sectors; for FP16 this requires $K \bmod 16 = 0$ for full utilization.
+\textbf{(2)~Memory}: The A100 L2 Cache operates in 32-byte sectors; for FP16 this requires $K \bmod 16 = 0$ for full utilization.
 Misaligned accesses show ${\sim}$2$\times$ bandwidth loss in microbenchmarks (Figure~\ref{fig:hw_alignment}c).
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{figures/fig_hw_alignment.pdf}
-\caption{Hardware-level alignment penalties (sweep near 4096): (a,b)~Tensor Core throughput, (c)~L2 cache bandwidth.}
+\caption{Hardware-level alignment penalties (sweep near 4096): (a,b)~Tensor Core throughput, (c)~L2 Cache bandwidth.}
 \label{fig:hw_alignment}
 \end{figure*}
 
@@ -357,7 +357,7 @@ These penalties compound: a single misaligned dimension can trigger a backend fa
 
 \begin{table}[t]
 \centering
-\caption{Full-stack alignment constraint summary.}
+\caption{Full-stack alignment constraints summary.}
 \label{tab:constraints}
 \small
 \setlength{\tabcolsep}{2.5pt}
@@ -371,7 +371,7 @@ These penalties compound: a single misaligned dimension can trigger a backend fa
 \rowcolor{corange!8} Library & cuBLAS GeMM & $K$/$N$\%$8{=}0$ & ${\sim}$90\% \\
 \rowcolor{corange!8} Library & cuBLAS GeMV & $K$\%$8{=}0$ & ${\sim}$12\% \\
 \midrule
-\rowcolor{cred!8} Hardware & TC MMA & $K$\%16, $N$\%8 & ${\sim}$70\% \\
+\rowcolor{cred!8} Hardware & TC MMA & $K$\%$16{=}0$, $N$\%$8{=}0$ & ${\sim}$70\% \\
 \rowcolor{cred!8} Hardware & L2 sectors & $K$\%$16{=}0$ & ${\sim}$50\% \\
 \bottomrule
 \end{tabular}
@@ -423,14 +423,14 @@ Given a model $\mathcal{M}$ with $n$ compressible weights $\mathcal{W}$, a compr
 \label{sec:step1}
 
 We first apply $\mathcal{F}$ to $\mathcal{M}$ without alignment constraints.
-$\mathcal{F}$ can be any established dimension-reducing compressor---e.g., ASVD~\cite{asvd} (SVD factorization) or LLM-Pruner~\cite{llmpruner} (structured pruning).
+$\mathcal{F}$ can be any established dimension-reducing compressor---e.g., ASVD~\citep{asvd} (SVD factorization) or LLM-Pruner~\citep{llmpruner} (structured pruning).
 Internally, $\mathcal{F}$ computes a per-weight importance score $s_i$ using one of the proxies in Table~\ref{tab:importance_scores} (e.g., activation magnitude for ASVD, gradient-based Taylor expansion for LLM-Pruner), then allocates dimensions $\{d_i^*\}$ proportionally: higher $s_i$ retains a larger $d_i^*$.
 Because $s_i$ and the resulting $\{d_i^*\}$ are continuous, the compressed model is \emph{misaligned}.
 
-\subsection{Step 2:Dimension Sweep}
+\subsection{Step 2: Dimension Sweep}
 \label{sec:step2}
 
-A na\"ive fix would round every $d_i^*$ to the nearest sweetpoint (e.g. multiple of) from the Constraints Table~\ref{tab:constraints}.
+A na\"ive fix would round every $d_i^*$ to the nearest sweet point (e.g., multiple of 8, 16, 32) from the Constraints Table~\ref{tab:constraints}.
 However, we cannot hard-code alignment rounding rules because different operators exhibit different behavior across different platforms (e.g., GPU architecture, PyTorch version).
 A fixed heuristic that works on one platform may miss cliffs or exclude valid dimensions on another.
 
@@ -480,7 +480,7 @@ In practice, the DP runs in under one second on CPU---negligible compared to the
 
 \subsection{Setup}
 
-We evaluate on Llama-3-8B~\cite{llama3} with $\rho=15\%$ using an NVIDIA A100-80GB with PyTorch 2.9.1, CUDA 12.8, FP16.
+We evaluate on Llama-3-8B~\citep{llama3} with $\rho=15\%$ using an NVIDIA A100-80GB with PyTorch 2.9.1, CUDA 12.8, FP16.
 We select two representative compressors that alter tensor dimensions in orthogonal ways:
 \textbf{(1)~ASVD}~\citep{asvd}: activation-aware SVD ($W \to A \cdot B$) across all projection weights\footnote{All 32 layers $\times$ 7 projections (Q, K, V, O, gate, up, down) = 224 weights.}.
 \textbf{(2)~LLM-Pruner}~\citep{llmpruner}: coupled structured pruning of MLP weights\footnote{Layers 3--31 (29/32 layers); gate\_proj as pruning root, propagating to up\_proj and down\_proj.}.
@@ -518,13 +518,13 @@ Pruner (GAC) & 100\% & 9.87 & 0.78 & 0.47 & 88.0\,{\scriptsize\textcolor{cgreen}
 \end{table}
 
 \noindent \textbf{Alignment.}
-ASVD's unconstrained allocation produces 95\% misaligned dimensions, while LLM-Pruner produces 17\% misaligned dimensions (it only prunes MLP, so attention weights stays aligned).
+ASVD's unconstrained allocation produces 95\% misaligned dimensions, while LLM-Pruner produces 17\% misaligned dimensions (it only prunes MLP, so attention weights stay aligned).
 GAC brings both to 100\%, snapping every dimension to an aligned candidate via the asymmetric DP objective (Eq.~\ref{eq:gac}).
 
 \noindent \textbf{Accuracy.}
 We report perplexity (WikiText-2) and two downstream tasks (PiQA, HellaSwag; 200 samples each).
 For ASVD, GAC lowers PPL from 34.7 to 31.3 because the DP rounds sensitive layers \emph{up}; downstream scores stay comparable
-(PiQA 0.58$\to$0.51, HellaSwag 0.28$\to$0.26).
+(PiQA 0.58$\to$0.57, HellaSwag 0.28$\to$0.26).
 For LLM-Pruner, PPL is nearly identical (9.88 vs.\ 9.87) and downstream accuracy is well preserved (PiQA 0.80$\to$0.78, HellaSwag 0.49$\to$0.47), confirming that aligned re-selection does not sacrifice quality.
 
 \noindent \textbf{Latency.}
@@ -549,14 +549,14 @@ The penalty grows with sequence length (Figure~\ref{fig:prefill_scaling}): from 
 \label{sec:related}
 
 \noindent \textbf{System-aware compression.}
-Dimension-reducing compressors such as SVD factorization~\cite{asvd,svdllm2024,palu}, structured pruning~\cite{sparsegpt,wanda,llmpruner}, and KV eviction~\cite{h2o,quest,pyramidkv} optimize accuracy under a size budget but ignore how the resulting dimensions interact with GPU execution.
-HALP~\cite{halp2021} and HALOC~\cite{haloc2023} incorporate hardware awareness into CNN compression, but treat latency as a \emph{black-box} signal: they optimize aggregate runtime without isolating \emph{why} certain dimensions are slow, and are tied to specific CNN architectures with no parameter-budget guarantee.
+Dimension-reducing compressors such as SVD factorization~\citep{asvd,svdllm2024,palu}, structured pruning~\citep{sparsegpt,wanda,llmpruner}, and KV eviction~\citep{h2o,quest,pyramidkv} optimize accuracy under a size budget but ignore how the resulting dimensions interact with GPU execution.
+HALP~\citep{halp2021} and HALOC~\citep{haloc2023} incorporate hardware awareness into CNN compression, but treat latency as a \emph{black-box} signal: they optimize aggregate runtime without isolating \emph{why} certain dimensions are slow, and are tied to specific CNN architectures with no parameter-budget guarantee.
 GAC instead identifies root causes at three levels (framework dispatch, kernel selection, hardware tile alignment; \S\ref{sec:analysis}) and constrains dimension selection directly, complementing any upstream compressor while guaranteeing both alignment and parameter budget.
 
 \noindent \textbf{Serving-side mitigations.}
 Serving systems handle misalignment \emph{reactively}.
 FlashAttention-2 pads to the next template
-(${\sim}$30\% overhead; \S\ref{sec:framework}); vLLM~\cite{vllm} rejects unsupported head dimensions.
+(${\sim}$30\% overhead; \S\ref{sec:framework}); vLLM~\citep{vllm} rejects unsupported head dimensions.
 These add overhead or break compatibility.
 GAC prevents misalignment at compression time, eliminating such workarounds.
 
@@ -569,11 +569,11 @@ A fully general GAC framework---where users supply only a model name, compressio
 
 \noindent \textbf{Model coverage.}
 We evaluate on a single dense model (Llama-3-8B).
-Extending to more variaties(larger scales, MoE architectures, etc.) would test GAC's generality.
+Extending to more varieties (larger scales, MoE architectures, etc.) would test GAC's generality.
 
 \noindent \textbf{Hardware diversity.}
 All experiments use Ampere (A100).
-Newer GPUs impose stricter alignment~\cite{nvidia_tensor_core_evolution2024,nvidia_hopper_whitepaper,flashattention3};
+Newer GPUs impose stricter alignment~\citep{nvidia_tensor_core_evolution2024,nvidia_hopper_whitepaper,flashattention3};
 edge devices (e.g., DGX Spark) add further constraints.
 Profiling across generations would yield a broader heuristic landscape.
 
@@ -583,7 +583,7 @@ Covering a wider range of batch sizes and sequence lengths, as well as autoregre
 
 \noindent \textbf{Serving-engine compatibility.}
 Our benchmarks use vanilla HuggingFace PyTorch models without any inference-time optimization.
-Validating GAC under optimized serving engines (e.g., vLLM~\cite{vllm}, TensorRT~\cite{tensorrt}) and DL compilers (e.g., TVM) is needed to confirm alignment gains carry over to production stacks.
+Validating GAC under optimized serving engines (e.g., vLLM~\citep{vllm}, TensorRT~\citep{tensorrt}) and DL compilers (e.g., TVM) is needed to confirm alignment gains carry over to production stacks.
 
 
 %% ===========================================
