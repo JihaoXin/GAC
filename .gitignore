@@ -38,6 +38,8 @@ Latex/main_*.tex
 Latex/main_*.pdf
 Latex/page_*.png
 Latex/.nfs*
+Latex/main.pdf
+Latex/main.*.gz
 
 # Temporary analysis reports (auto-generated)
 *_VERIFICATION_RESULT.md
