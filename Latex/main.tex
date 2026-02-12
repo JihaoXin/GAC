@@ -14,6 +14,8 @@
 \usepackage{booktabs}
 \usepackage{subcaption}
 \usepackage{xcolor}
+\usepackage{todonotes}
+\usepackage{soul}
 \usepackage{graphicx}
 \usepackage{tikz}
 \usetikzlibrary{positioning,decorations.pathreplacing,fit,backgrounds}
@@ -36,6 +38,20 @@
 \definecolor{cred}{RGB}{211,63,73}
 \definecolor{cgreen}{RGB}{56,158,92}
 \definecolor{corange}{RGB}{230,159,0}
+
+\newif\ifsubmission
+\submissionfalse    
+% \submissiontrue
+
+\ifsubmission
+\newcommand{\mcnote}[1]{}
+\newcommand{\jhnote}[1]{}
+\newcommand{\tlnote}[1]{}
+\else
+\newcommand{\mcnote}[1]{\todo[color=violet!40,inline]{\hl{\textbf{MC:} } #1}}
+\newcommand{\jhnote}[1]{\todo[color=cyan!10!white,inline]{\hl{\textbf{JH:} }\small #1}}
+\newcommand{\tlnote}[1]{\todo[color=green!15!white,inline]{\hl{\textbf{TL:} }\small #1}}
+\fi
 
 %% Title
 \title{Why Smaller Is Slower?\\ Dimensional Misalignment in Compressed LLMs}
@@ -93,8 +109,8 @@ On Llama-3-8B with ASVD and LLM-Pruner, GAC achieves 100\% alignment, recovering
 \section{Introduction}
 \label{sec:intro}
 
-Large Language Models (LLMs) deliver strong capabilities, but their scale hinders deployment~\cite{llama3}.
-Post-training compression reduces model size and can be categorized into three families: \emph{quantization}~\cite{gptq,awq}, \emph{sparsification}~\cite{sparsegpt,wanda}, and \emph{dimension reduction}~\cite{asvd,palu,llmpruner,h2o,pyramidkv}.
+Large Language Models (LLMs) deliver strong capabilities, but their scale hinders deployment.
+Post-training compression reduces model size and can be categorized into three families: \emph{quantization}~\cite{gptq,awq}, \emph{sparsification}~\cite{sparsegpt,wanda}, and \emph{dimension reduction}~\cite{asvd,palu,pyramidkv}.
 Quantization and sparsification preserve tensor shapes and are therefore compatible with existing GPU kernels.
 Dimension reduction, however, alters the tensor shapes often producing \emph{irregular} dimensions (e.g., dimension reduced from 128 to 107), which conflict with GPU execution primitives---Tensor Core tiles, cuBLAS kernels, and framework backend selection---causing a counterintuitive outcome: \emph{models with \textbf{fewer} parameters run \textbf{slower} than uncompressed ones}.
 We term this phenomenon \textbf{dimensional misalignment}.
@@ -146,7 +162,7 @@ Prior hardware-aware methods~\cite{halp2021,haloc2023} treat latency as a black-
 
 We propose \textbf{GAC} (GPU-Aligned Compression), a compression \emph{paradigm} that imposes hardware alignment constraints on any dimension-reducing compressor.
 GAC first identifies \emph{why} certain dimensions are slow via a full-stack analysis (\S\ref{sec:analysis}), then constrains a multi-choice knapsack optimizer to re-select aligned dimensions under the same parameter budget.
-GACis a compressor-agnostic framework that restores speed without changing the upstream compressor's design.
+GAC is a compressor-agnostic framework that restores speed without changing the upstream compressor's design.
 
 \noindent \textbf{Contributions.}\\
 \textbf{(1)}~We identify the \emph{dimensional misalignment} problem and demonstrate its prevalence across compressors (\S\ref{sec:misalignment}).\\
@@ -185,7 +201,9 @@ Second, allocate the budget $B$ by assigning each $W_i$ a dimension $d_i$ thus t
 \label{eq:budget_allocation}
 \end{equation}
 Here $d_i$ is the compressed dimension (e.g., inner dimension or output width, varies by compression method), $|W_i|$ is the parameter count given dimension $d_i$, $|\mathcal{W}'| = \sum_i |W_i|$ is the total parameter count of the compressed model, and $B$ is the parameter budget.
-Because $s_i$ and the optimum $\{d_i\}$ are continuous, the resulting dimensions are typically \emph{irregular} (e.g., 107, 108, 109) and often violate GPU alignment requirements (e.g.\ $d \bmod 8 = 0$), triggering backend fallbacks and kernel switches that erase the expected speedup from fewer parameters and FLOPs.
+Because $s_i$ and the optimum $\{d_i\}$ are continuous, the resulting dimensions are typically \emph{irregular} (e.g., 107, 108, 109) and often violate GPU alignment requirements (e.g.\ $d \bmod 8 = 0$),
+\tlnote{you use $d_i$ in this sentence before for compressed dimension, and now $d$ for model dimension}
+ triggering backend fallbacks and kernel switches that erase the expected speedup from fewer parameters and FLOPs.
 
 We demonstrate the dimensional misalignment problem with a real-world example: PaLU~\cite{palu}.
 We use \textbf{8-alignment} ($d \bmod 8 = 0$) as an example of alignment constraints. When dimensions are not 8-aligned, latency can increase by up to 90\% (Figure~\ref{fig:sdpa_latency}); we detail this analysis in \S\ref{sec:analysis}.
@@ -263,7 +281,7 @@ Profiling shows that PyTorch uses FlashAttention only when $d \bmod 8 = 0$; othe
 Second, among 8-aligned dimensions, latency rises in a staircase at every 32-dimension boundary.
 This is caused by FlashAttention-2's template mechanism: FA2 selects the smallest template $t \geq d$ and assigns a tile shape $B_r {\times} B_c$ accordingly (Table~\ref{tab:fa2_templates}).
 Crossing a template boundary (e.g., $d{=}128 \to 129$) halves $B_c$ and roughly doubles latency.
-In Figure~\ref{fig:sdpa_latency}, alternating shades mark template regions; labels such as ``$t{=}96$, $128{\times}64$'' show the active template and tile shape.
+In Figure~\ref{fig:sdpa_latency}, alternating shades mark template regions; labels such as ``$t{=}96$, $B_r {\times} B_c{=}128{\times}64$'' show the active template and tile shape.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/fig2_sdpa_latency.pdf}
@@ -430,7 +448,8 @@ Because $s_i$ and the resulting $\{d_i^*\}$ are continuous, the compressed model
 \subsection{Step 2:Dimension Sweep}
 \label{sec:step2}
 
-A na\"ive fix would round every $d_i^*$ to the nearest sweetpoint (e.g. multiple of) from the Constraints Table~\ref{tab:constraints}.
+A na\"ive fix would round every $d_i^*$ to the nearest sweetpoint (e.g. multiple of)
+\tlnote{multiple of \texttt{8}?} from the Constraints Table~\ref{tab:constraints}.
 However, we cannot hard-code alignment rounding rules because different operators exhibit different behavior across different platforms (e.g., GPU architecture, PyTorch version).
 A fixed heuristic that works on one platform may miss cliffs or exclude valid dimensions on another.
 
