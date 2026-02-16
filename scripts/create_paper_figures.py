@@ -634,14 +634,23 @@ def fig_alignment_sweep(csv_path='results/alignment_sweep.csv'):
 
     # Load data
     data = {'M': ([], []), 'N': ([], []), 'K': ([], [])}
+    data_all = {'M': ([], []), 'N': ([], []), 'K': ([], [])}
     with open(csv_path) as f:
         reader = csv_mod.DictReader(f)
         for row in reader:
             name = row['dim_name']
+            data_all[name][0].append(int(row['dim_value']))
+            data_all[name][1].append(float(row['time_us']))
             if 'Memset' in row.get('kernel', ''):
                 continue
             data[name][0].append(int(row['dim_value']))
             data[name][1].append(float(row['time_us']))
+
+    # If one dimension has no non-Memset points, fall back to all points for that panel.
+    for key in data:
+        if len(data[key][0]) == 0 and len(data_all[key][0]) > 0:
+            data[key] = data_all[key]
+            print(f"  Warning: {key} sweep has no non-Memset kernels; using all points.")
 
     # Convert to numpy and sort
     for key in data:
@@ -649,6 +658,11 @@ def fig_alignment_sweep(csv_path='results/alignment_sweep.csv'):
         xs, ys = np.array(xs), np.array(ys)
         order = np.argsort(xs)
         data[key] = (xs[order], ys[order])
+    for key in data_all:
+        xs, ys = data_all[key]
+        xs, ys = np.array(xs), np.array(ys)
+        order = np.argsort(xs)
+        data_all[key] = (xs[order], ys[order])
 
     panels = [
         ('K', '(a) Vary $K$'),
@@ -670,6 +684,16 @@ def fig_alignment_sweep(csv_path='results/alignment_sweep.csv'):
         mask_mis = ~mask_a8
         xs_a, ys_a = xs[mask_a8], ys[mask_a8]
         xs_m, ys_m = xs[mask_mis], ys[mask_mis]
+
+        # H100 8k case: profiler may label all aligned points as Memset, which
+        # would remove the aligned trace entirely. Fall back to all-point aligned/misaligned.
+        xs_all, ys_all = data_all[dim_name]
+        if len(xs_a) == 0:
+            mask_a8_all = (xs_all % 8 == 0)
+            xs_a, ys_a = xs_all[mask_a8_all], ys_all[mask_a8_all]
+        if len(xs_m) == 0:
+            mask_mis_all = (xs_all % 8 != 0)
+            xs_m, ys_m = xs_all[mask_mis_all], ys_all[mask_mis_all]
 
         # Smooth both traces (rolling median)
         win = 4 if dim_name == 'K' else 8
@@ -697,9 +721,12 @@ def fig_alignment_sweep(csv_path='results/alignment_sweep.csv'):
                 linewidth=0.8, alpha=0.6, zorder=2,
                 label='Misaligned ($d$ mod 8 $\\neq$ 0)')
 
-        # Ticks
+        # Ticks (adaptive for large K ranges)
         if dim_name == 'K':
-            ticks = [d for d in range(lo, hi + 1) if d % 8 == 0]
+            if (hi - lo) > 256:
+                ticks = list(range(lo, hi + 1, 50))
+            else:
+                ticks = [d for d in range(lo, hi + 1) if d % 8 == 0]
         else:
             ticks = list(range(lo, hi + 1, 128))
 
@@ -774,20 +801,34 @@ def fig_alignment_sweep_compact(csv_path='results/alignment_sweep.csv'):
     from scipy.interpolate import interp1d
 
     data = {'M': ([], []), 'N': ([], []), 'K': ([], [])}
+    data_all = {'M': ([], []), 'N': ([], []), 'K': ([], [])}
     with open(csv_path) as f:
         reader = csv_mod.DictReader(f)
         for row in reader:
             name = row['dim_name']
+            data_all[name][0].append(int(row['dim_value']))
+            data_all[name][1].append(float(row['time_us']))
             if 'Memset' in row.get('kernel', ''):
                 continue
             data[name][0].append(int(row['dim_value']))
             data[name][1].append(float(row['time_us']))
+
+    # If one dimension has no non-Memset points, fall back to all points for that panel.
+    for key in data:
+        if len(data[key][0]) == 0 and len(data_all[key][0]) > 0:
+            data[key] = data_all[key]
+            print(f"  Warning: {key} sweep has no non-Memset kernels; using all points.")
 
     for key in data:
         xs, ys = data[key]
         xs, ys = np.array(xs), np.array(ys)
         order = np.argsort(xs)
         data[key] = (xs[order], ys[order])
+    for key in data_all:
+        xs, ys = data_all[key]
+        xs, ys = np.array(xs), np.array(ys)
+        order = np.argsort(xs)
+        data_all[key] = (xs[order], ys[order])
 
     panels = [
         ('M', '$M$ Dimension'),
@@ -799,7 +840,7 @@ def fig_alignment_sweep_compact(csv_path='results/alignment_sweep.csv'):
                               gridspec_kw={'wspace': 0.22})
 
     _ann_kw = dict(fontsize=6, fontweight='bold', ha='center', va='center',
-                   color='#444444', annotation_clip=False,
+                   color='#444444', annotation_clip=True,
                    bbox=dict(boxstyle='round,pad=0.1', facecolor='#FFFFDD',
                              edgecolor='#999999', linewidth=0.4, alpha=0.85),
                    arrowprops=dict(arrowstyle='->', color='#999999', lw=0.5))
@@ -813,6 +854,16 @@ def fig_alignment_sweep_compact(csv_path='results/alignment_sweep.csv'):
         mask_mis = ~mask_a8
         xs_a, ys_a = xs[mask_a8], ys[mask_a8]
         xs_m, ys_m = xs[mask_mis], ys[mask_mis]
+
+        # H100 8k case: profiler may label aligned points as Memset and drop
+        # them from filtered data. Recover aligned/misaligned traces from all points.
+        xs_all, ys_all = data_all[dim_name]
+        if len(xs_a) == 0:
+            mask_a8_all = (xs_all % 8 == 0)
+            xs_a, ys_a = xs_all[mask_a8_all], ys_all[mask_a8_all]
+        if len(xs_m) == 0:
+            mask_mis_all = (xs_all % 8 != 0)
+            xs_m, ys_m = xs_all[mask_mis_all], ys_all[mask_mis_all]
 
         win = 4 if dim_name == 'K' else 8
         ys_a_smooth = median_filter(ys_a, size=win) if len(ys_a) > win else ys_a
@@ -835,9 +886,13 @@ def fig_alignment_sweep_compact(csv_path='results/alignment_sweep.csv'):
         ax.set_xlim(lo, hi)
 
         if dim_name == 'K':
-            ticks = [d for d in range(lo, hi + 1) if d % 8 == 0]
-            ax.set_xticks(ticks)
-            ax.tick_params(axis='x', rotation=45)
+            if (hi - lo) > 256:
+                ticks = list(range(lo, hi + 1, 50))
+                ax.set_xticks(ticks)
+            else:
+                ticks = [d for d in range(lo, hi + 1) if d % 8 == 0]
+                ax.set_xticks(ticks)
+                ax.tick_params(axis='x', rotation=45)
 
     axes[0].set_ylabel('Latency ($\\mu$s)', fontsize=7)
 
@@ -853,22 +908,31 @@ def fig_alignment_sweep_compact(csv_path='results/alignment_sweep.csv'):
 
     # Kernel annotations on M panel (axes[0])
     ax_m = axes[0]
+    xlo_m, xhi_m = ax_m.get_xlim()
     for bnd in [1089, 1153, 1729]:
-        ax_m.axvline(x=bnd, **_vline_kw)
+        if xlo_m <= bnd <= xhi_m:
+            ax_m.axvline(x=bnd, **_vline_kw)
     y_top_m = ax_m.get_ylim()[1]
-    ax_m.annotate('A$\\to$B', xy=(1089, 13.0),
-                  xytext=(1200, 12.0), **_ann_kw)
-    ax_m.annotate('B$\\to$C', xy=(1153, 14.0),
-                  xytext=(1250, 14.0), **_ann_kw)
-    ax_m.annotate('C$\\to$B', xy=(1729, y_top_m * 0.95),
-                  xytext=(1650, y_top_m * 0.75), **_ann_kw)
+    if xlo_m <= 1089 <= xhi_m and xlo_m <= 1200 <= xhi_m:
+        ax_m.annotate('A$\\to$B', xy=(1089, 13.0),
+                      xytext=(1200, 12.0), **_ann_kw)
+    if xlo_m <= 1153 <= xhi_m and xlo_m <= 1250 <= xhi_m:
+        ax_m.annotate('B$\\to$C', xy=(1153, 14.0),
+                      xytext=(1250, 14.0), **_ann_kw)
+    if xlo_m <= 1729 <= xhi_m and xlo_m <= 1650 <= xhi_m:
+        ax_m.annotate('C$\\to$B', xy=(1729, y_top_m * 0.95),
+                      xytext=(1650, y_top_m * 0.75), **_ann_kw)
 
     # Kernel annotations on N panel (axes[1])
     ax_n = axes[1]
+    xlo_n, xhi_n = ax_n.get_xlim()
     for bnd in [1250, 1664]:
-        ax_n.axvline(x=bnd, **_vline_kw)
-    ax_n.annotate('B$\\to$C', xy=(1280, 14), xytext=(1400, 16.5), **_ann_kw)
-    ax_n.annotate('C$\\to$B', xy=(1664, 14), xytext=(1560, 17), **_ann_kw)
+        if xlo_n <= bnd <= xhi_n:
+            ax_n.axvline(x=bnd, **_vline_kw)
+    if xlo_n <= 1280 <= xhi_n and xlo_n <= 1400 <= xhi_n:
+        ax_n.annotate('B$\\to$C', xy=(1280, 14), xytext=(1400, 16.5), **_ann_kw)
+    if xlo_n <= 1664 <= xhi_n and xlo_n <= 1560 <= xhi_n:
+        ax_n.annotate('C$\\to$B', xy=(1664, 14), xytext=(1560, 17), **_ann_kw)
 
     fig.subplots_adjust(left=0.07, right=0.98, top=0.96, bottom=0.24, wspace=0.22)
     fig.savefig(OUTPUT_DIR / 'fig_gemm_alignment.pdf')

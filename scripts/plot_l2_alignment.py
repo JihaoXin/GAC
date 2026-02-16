@@ -7,6 +7,23 @@ Style matching the SDPA latency plot.
 import matplotlib.pyplot as plt
 import numpy as np
 import json
+import argparse
+from pathlib import Path
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Plot L2 alignment figure")
+    parser.add_argument("--out-dir", type=str, default="Latex/figures",
+                        help="Output directory for figures")
+    parser.add_argument("--suffix", type=str, default="",
+                        help="Filename suffix, e.g., _h100")
+    return parser.parse_args()
+
+
+args = parse_args()
+out_dir = Path(args.out_dir)
+out_dir.mkdir(parents=True, exist_ok=True)
+suffix = args.suffix
 
 # Load dense sweep data
 try:
@@ -67,6 +84,8 @@ ax.grid(axis='both', alpha=0.3, linestyle='-', linewidth=0.5)
 ax.set_axisbelow(True)
 
 plt.tight_layout()
-plt.savefig('Latex/figures/fig_l2_alignment.pdf', bbox_inches='tight', dpi=150)
-plt.savefig('Latex/figures/fig_l2_alignment.png', bbox_inches='tight', dpi=150)
-print("Saved to Latex/figures/fig_l2_alignment.pdf")
+out_pdf = out_dir / f'fig_l2_alignment{suffix}.pdf'
+out_png = out_dir / f'fig_l2_alignment{suffix}.png'
+plt.savefig(out_pdf, bbox_inches='tight', dpi=150)
+plt.savefig(out_png, bbox_inches='tight', dpi=150)
+print(f"Saved to {out_pdf}")

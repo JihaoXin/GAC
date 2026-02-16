@@ -29,9 +29,31 @@ from src.utils import set_deterministic, get_dtype, compute_statistics, allocate
 from src.environment import collect_environment
 
 
-# A100 theoretical peaks
-A100_FP16_TFLOPS = 312  # TF32: 156 TFLOPS, FP16 Tensor Core: 312 TFLOPS
-A100_MEM_BW_GBS = 2039  # HBM2e: 2039 GB/s (80GB variant)
+# Theoretical peaks
+GPU_SPECS = {
+    "A100": {"FP16_TFLOPS": 312, "MEM_BW_GBS": 2039},  # 80GB
+    "H100": {"FP16_TFLOPS": 989, "MEM_BW_GBS": 3350},  # SXM5 (approx)
+    "DEFAULT": {"FP16_TFLOPS": 312, "MEM_BW_GBS": 2039},
+}
+
+CURRENT_GPU_SPECS = GPU_SPECS["DEFAULT"]
+
+def set_gpu_specs(device: str):
+    global CURRENT_GPU_SPECS
+    try:
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(device)
+            print(f"Detected GPU: {gpu_name}")
+            if "H100" in gpu_name:
+                CURRENT_GPU_SPECS = GPU_SPECS["H100"]
+            elif "A100" in gpu_name:
+                CURRENT_GPU_SPECS = GPU_SPECS["A100"]
+            else:
+                print(f"Unknown GPU {gpu_name}, using default (A100) specs.")
+                CURRENT_GPU_SPECS = GPU_SPECS["DEFAULT"]
+    except Exception as e:
+        print(f"Error detecting GPU: {e}, using default specs.")
+
 
 
 def analyze_tensor_core_utilization(device: str = "cuda:0", seed: int = 42) -> dict:
@@ -61,7 +83,7 @@ def analyze_tensor_core_utilization(device: str = "cuda:0", seed: int = 42) -> d
         "description": "Tensor Core utilization vs K dimension alignment",
         "config": {"M": M, "N": N, "dtype": "fp16"},
         "measurements": [],
-        "a100_peak_tflops": A100_FP16_TFLOPS,
+        "peak_tflops": CURRENT_GPU_SPECS["FP16_TFLOPS"],
     }
 
     warmup = 30
@@ -77,7 +99,7 @@ def analyze_tensor_core_utilization(device: str = "cuda:0", seed: int = 42) -> d
 
         mean_time_s = stats["mean"] / 1000.0
         tflops = compute_gemm_tflops(M, N, K, mean_time_s)
-        utilization = (tflops / A100_FP16_TFLOPS) * 100
+        utilization = (tflops / CURRENT_GPU_SPECS["FP16_TFLOPS"]) * 100
 
         # Compute alignment properties
         mod_8 = K % 8 == 0
@@ -191,7 +213,7 @@ def analyze_l2_cache_efficiency(device: str = "cuda:0", seed: int = 42) -> dict:
         waste_pct = ((bytes_fetched - row_bytes) / row_bytes) * 100
 
         # Efficiency relative to peak
-        bw_efficiency = (bandwidth / A100_MEM_BW_GBS) * 100
+        bw_efficiency = (bandwidth / CURRENT_GPU_SPECS["MEM_BW_GBS"]) * 100
 
         mod_8 = head_dim % 8 == 0
         mod_16 = head_dim % 16 == 0
@@ -272,7 +294,7 @@ def analyze_memory_bandwidth_efficiency(device: str = "cuda:0", seed: int = 42) 
         mean_time_s = stats["mean"] / 1000.0
         total_bytes = seq_len * head_dim * tensor.element_size()
         bandwidth = total_bytes / (mean_time_s * 1e9)  # GB/s
-        efficiency = (bandwidth / A100_MEM_BW_GBS) * 100
+        efficiency = (bandwidth / CURRENT_GPU_SPECS["MEM_BW_GBS"]) * 100
 
         mod_8 = head_dim % 8 == 0
         mod_16 = head_dim % 16 == 0
@@ -525,6 +547,7 @@ def main():
     else:
         output_dir = Path(args.output_dir)
 
+    set_gpu_specs(args.device)
     run_all_analyses(output_dir, args.device, args.seed)
 
     # Print output path for sbatch script

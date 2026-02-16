@@ -106,7 +106,15 @@ def classify_kernel(name):
     return " | ".join(props) if props else name[:60]
 
 
-def run_sweep(output_csv="results/alignment_sweep.csv"):
+def run_sweep(
+    output_csv="results/alignment_sweep.csv",
+    m_range=(1024, 2048),
+    n_range=(1024, 2048),
+    k_range=(64, 128),
+    fixed_m=2048,
+    fixed_n=2048,
+    fixed_k=128,
+):
     """Sweep dim 64-128 for M, N, K independently. Output CSV.
 
     Baseline shape: M=2048, N=2048, K=128
@@ -121,10 +129,14 @@ def run_sweep(output_csv="results/alignment_sweep.csv"):
 
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
 
+    m0, m1 = m_range
+    n0, n1 = n_range
+    k0, k1 = k_range
+
     sweeps = [
-        ("N", range(1024, 2049), lambda d: (2048, d, 128)),
-        ("K", range(64, 129),    lambda d: (2048, 2048, d)),
-        ("M", range(1024, 2049), lambda d: (d, 2048, 128)),
+        ("N", range(n0, n1 + 1), lambda d: (fixed_m, d, fixed_k)),
+        ("K", range(k0, k1 + 1), lambda d: (fixed_m, fixed_n, d)),
+        ("M", range(m0, m1 + 1), lambda d: (d, fixed_n, fixed_k)),
     ]
 
     rows = []
@@ -163,10 +175,30 @@ def main():
                         help="Run fine-grained 64-128 sweep and output CSV")
     parser.add_argument("--sweep-csv", default="results/alignment_sweep.csv",
                         help="Output CSV path for sweep mode")
+    parser.add_argument("--sweep-m-range", nargs=2, type=int, default=[1024, 2048],
+                        metavar=("START", "END"), help="M sweep range (inclusive)")
+    parser.add_argument("--sweep-n-range", nargs=2, type=int, default=[1024, 2048],
+                        metavar=("START", "END"), help="N sweep range (inclusive)")
+    parser.add_argument("--sweep-k-range", nargs=2, type=int, default=[64, 128],
+                        metavar=("START", "END"), help="K sweep range (inclusive)")
+    parser.add_argument("--sweep-fixed-m", type=int, default=2048,
+                        help="Fixed M for N/K sweeps")
+    parser.add_argument("--sweep-fixed-n", type=int, default=2048,
+                        help="Fixed N for M/K sweeps")
+    parser.add_argument("--sweep-fixed-k", type=int, default=128,
+                        help="Fixed K for M/N sweeps")
     args = parser.parse_args()
 
     if args.sweep:
-        run_sweep(args.sweep_csv)
+        run_sweep(
+            output_csv=args.sweep_csv,
+            m_range=tuple(args.sweep_m_range),
+            n_range=tuple(args.sweep_n_range),
+            k_range=tuple(args.sweep_k_range),
+            fixed_m=args.sweep_fixed_m,
+            fixed_n=args.sweep_fixed_n,
+            fixed_k=args.sweep_fixed_k,
+        )
         return
 
     torch.cuda.init()

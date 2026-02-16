@@ -12,6 +12,7 @@ Tensor Core constraints:
 import torch
 import numpy as np
 import json
+import argparse
 
 
 def benchmark_gemm_cublas(M, N, K, repeats=100):
@@ -56,24 +57,36 @@ def benchmark_gemm_cublas(M, N, K, repeats=100):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Tensor Core MMA alignment sweep")
+    parser.add_argument('--start', type=int, default=4000, help='Sweep start dimension')
+    parser.add_argument('--end', type=int, default=4100, help='Sweep end dimension (inclusive)')
+    parser.add_argument('--m-fixed', type=int, default=512, help='Fixed M for K/N sweeps')
+    parser.add_argument('--n-fixed', type=int, default=4096, help='Fixed N for K/M sweeps')
+    parser.add_argument('--k-fixed', type=int, default=4096, help='Fixed K for N/M sweeps')
+    parser.add_argument('--m-start', type=int, default=500, help='M sweep start')
+    parser.add_argument('--m-end', type=int, default=600, help='M sweep end (inclusive)')
+    parser.add_argument('--repeats', type=int, default=100, help='Repeats per point')
+    parser.add_argument('--output', type=str, default='results/tensor_core_alignment_sweep.json', help='Output JSON path')
+    args = parser.parse_args()
+
     results = []
 
     # Fixed dimensions for sweep
-    M_fixed = 512
-    N_fixed = 4096
+    M_fixed = args.m_fixed
+    N_fixed = args.n_fixed
 
     # K sweep (most important for Tensor Core)
     print("=" * 70)
     print(f"GEMM K Sweep (M={M_fixed}, N={N_fixed} fixed)")
     print("=" * 70)
 
-    K_values = list(range(4000, 4101))  # K from 4000 to 4100
+    K_values = list(range(args.start, args.end + 1))
 
     print(f"{'K':>6} | {'K%16':>5} | {'Latency':>10} | {'TFLOPS':>8} | Note")
     print("-" * 60)
 
     for K in K_values:
-        result = benchmark_gemm_cublas(M_fixed, N_fixed, K)
+        result = benchmark_gemm_cublas(M_fixed, N_fixed, K, repeats=args.repeats)
         result['sweep'] = 'K_sweep'
         results.append(result)
 
@@ -86,14 +99,14 @@ def main():
     print(f"GEMM N Sweep (M={M_fixed}, K=4096 fixed)")
     print("=" * 70)
 
-    K_fixed = 4096
-    N_values = list(range(4000, 4101))  # N from 4000 to 4100
+    K_fixed = args.k_fixed
+    N_values = list(range(args.start, args.end + 1))
 
     print(f"{'N':>6} | {'N%8':>4} | {'Latency':>10} | {'TFLOPS':>8} | Note")
     print("-" * 60)
 
     for N in N_values:
-        result = benchmark_gemm_cublas(M_fixed, N, K_fixed)
+        result = benchmark_gemm_cublas(M_fixed, N, K_fixed, repeats=args.repeats)
         result['sweep'] = 'N_sweep'
         results.append(result)
 
@@ -106,13 +119,13 @@ def main():
     print(f"GEMM M Sweep (N={N_fixed}, K=4096 fixed)")
     print("=" * 70)
 
-    M_values = list(range(500, 601))  # M from 500 to 600
+    M_values = list(range(args.m_start, args.m_end + 1))
 
     print(f"{'M':>6} | {'M%16':>5} | {'Latency':>10} | {'TFLOPS':>8} | Note")
     print("-" * 60)
 
     for M in M_values:
-        result = benchmark_gemm_cublas(M, N_fixed, K_fixed)
+        result = benchmark_gemm_cublas(M, N_fixed, K_fixed, repeats=args.repeats)
         result['sweep'] = 'M_sweep'
         results.append(result)
 
@@ -139,10 +152,10 @@ def main():
             print(f"{sweep_name}: Aligned={aligned_tflops:.1f} TFLOPS, Misaligned={misaligned_tflops:.1f} TFLOPS, Penalty={penalty:.1f}%")
 
     # Save results
-    with open('results/tensor_core_alignment_sweep.json', 'w') as f:
+    with open(args.output, 'w') as f:
         json.dump(results, f, indent=2)
 
-    print(f"\nSaved {len(results)} results to results/tensor_core_alignment_sweep.json")
+    print(f"\nSaved {len(results)} results to {args.output}")
 
 
 if __name__ == "__main__":

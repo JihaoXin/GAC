@@ -131,7 +131,7 @@ def prune_model(model, tokenizer, pruning_ratio, device, round_to=None,
 
     # Compute Taylor importance via backward pass
     print("    Computing Taylor importance...")
-    example_prompts = get_examples('bookcorpus', tokenizer, num_examples, seq_len=64)
+    example_prompts = get_examples('c4', tokenizer, num_examples, seq_len=64)
     example_prompts = example_prompts.to(device)
     loss = model(example_prompts, labels=example_prompts).loss
     print(f"    Loss = {loss.item():.4f}")
@@ -560,6 +560,10 @@ def main():
     parser.add_argument("--decode-gen-tokens", type=int, default=64)
     parser.add_argument("--decode-warmup", type=int, default=3)
     parser.add_argument("--decode-repeats", type=int, default=10)
+    parser.add_argument("--skip-decode", action="store_true",
+                        help="Skip decode latency benchmark (prefill-only runs)")
+    parser.add_argument("--skip-ppl", action="store_true",
+                        help="Skip perplexity evaluation (latency-only runs)")
     args = parser.parse_args()
 
     out_dir = Path(args.output)
@@ -592,10 +596,14 @@ def main():
     print(f"  MLP sizes: {mlp_sizes_bl}")
 
     # PPL
-    model = model.float()
-    t0 = time.time()
-    baseline_ppl = eval_ppl(model, tokenizer, dev)
-    print(f"  Baseline PPL: {baseline_ppl:.2f} ({time.time()-t0:.0f}s)")
+    if args.skip_ppl:
+        baseline_ppl = float("nan")
+        print("  Baseline PPL: skipped")
+    else:
+        model = model.float()
+        t0 = time.time()
+        baseline_ppl = eval_ppl(model, tokenizer, dev)
+        print(f"  Baseline PPL: {baseline_ppl:.2f} ({time.time()-t0:.0f}s)")
 
     result_bl = {
         "strategy": "baseline",
@@ -618,11 +626,12 @@ def main():
                                      args.prefill_warmup, args.prefill_repeats)
         result_bl["prefill_latency"] = lat
 
-        print("  Decode latency (baseline):")
-        dec = bench_decode_latency(model, tokenizer, dev,
-                                    args.decode_prompt_len, args.decode_gen_tokens,
-                                    args.decode_warmup, args.decode_repeats)
-        result_bl["decode_latency"] = dec
+        if not args.skip_decode:
+            print("  Decode latency (baseline):")
+            dec = bench_decode_latency(model, tokenizer, dev,
+                                        args.decode_prompt_len, args.decode_gen_tokens,
+                                        args.decode_warmup, args.decode_repeats)
+            result_bl["decode_latency"] = dec
 
     all_results.append(result_bl)
     del model
@@ -644,10 +653,14 @@ def main():
     n_params_p = sum(p.numel() for p in model.parameters())
 
     # PPL
-    model = model.float()
-    t0 = time.time()
-    ppl_p = eval_ppl(model, tokenizer, dev)
-    print(f"  PPL: {ppl_p:.2f} ({time.time()-t0:.0f}s)")
+    if args.skip_ppl:
+        ppl_p = float("nan")
+        print("  PPL: skipped")
+    else:
+        model = model.float()
+        t0 = time.time()
+        ppl_p = eval_ppl(model, tokenizer, dev)
+        print(f"  PPL: {ppl_p:.2f} ({time.time()-t0:.0f}s)")
 
     result_p = {
         "strategy": "pruned",
@@ -671,11 +684,12 @@ def main():
                                      args.prefill_warmup, args.prefill_repeats)
         result_p["prefill_latency"] = lat
 
-        print("  Decode latency (pruned):")
-        dec = bench_decode_latency(model, tokenizer, dev,
-                                    args.decode_prompt_len, args.decode_gen_tokens,
-                                    args.decode_warmup, args.decode_repeats)
-        result_p["decode_latency"] = dec
+        if not args.skip_decode:
+            print("  Decode latency (pruned):")
+            dec = bench_decode_latency(model, tokenizer, dev,
+                                        args.decode_prompt_len, args.decode_gen_tokens,
+                                        args.decode_warmup, args.decode_repeats)
+            result_p["decode_latency"] = dec
 
     all_results.append(result_p)
     del model
@@ -697,10 +711,14 @@ def main():
     n_params_r8 = sum(p.numel() for p in model.parameters())
 
     # PPL
-    model = model.float()
-    t0 = time.time()
-    ppl_r8 = eval_ppl(model, tokenizer, dev)
-    print(f"  PPL: {ppl_r8:.2f} ({time.time()-t0:.0f}s)")
+    if args.skip_ppl:
+        ppl_r8 = float("nan")
+        print("  PPL: skipped")
+    else:
+        model = model.float()
+        t0 = time.time()
+        ppl_r8 = eval_ppl(model, tokenizer, dev)
+        print(f"  PPL: {ppl_r8:.2f} ({time.time()-t0:.0f}s)")
 
     result_r8 = {
         "strategy": "pruned_r8",
@@ -724,11 +742,12 @@ def main():
                                      args.prefill_warmup, args.prefill_repeats)
         result_r8["prefill_latency"] = lat
 
-        print("  Decode latency (pruned_r8):")
-        dec = bench_decode_latency(model, tokenizer, dev,
-                                    args.decode_prompt_len, args.decode_gen_tokens,
-                                    args.decode_warmup, args.decode_repeats)
-        result_r8["decode_latency"] = dec
+        if not args.skip_decode:
+            print("  Decode latency (pruned_r8):")
+            dec = bench_decode_latency(model, tokenizer, dev,
+                                        args.decode_prompt_len, args.decode_gen_tokens,
+                                        args.decode_warmup, args.decode_repeats)
+            result_r8["decode_latency"] = dec
 
     all_results.append(result_r8)
     del model
@@ -750,10 +769,14 @@ def main():
     n_params_r16 = sum(p.numel() for p in model.parameters())
 
     # PPL
-    model = model.float()
-    t0 = time.time()
-    ppl_r16 = eval_ppl(model, tokenizer, dev)
-    print(f"  PPL: {ppl_r16:.2f} ({time.time()-t0:.0f}s)")
+    if args.skip_ppl:
+        ppl_r16 = float("nan")
+        print("  PPL: skipped")
+    else:
+        model = model.float()
+        t0 = time.time()
+        ppl_r16 = eval_ppl(model, tokenizer, dev)
+        print(f"  PPL: {ppl_r16:.2f} ({time.time()-t0:.0f}s)")
 
     result_r16 = {
         "strategy": "pruned_r16",
@@ -777,11 +800,12 @@ def main():
                                      args.prefill_warmup, args.prefill_repeats)
         result_r16["prefill_latency"] = lat
 
-        print("  Decode latency (pruned_r16):")
-        dec = bench_decode_latency(model, tokenizer, dev,
-                                    args.decode_prompt_len, args.decode_gen_tokens,
-                                    args.decode_warmup, args.decode_repeats)
-        result_r16["decode_latency"] = dec
+        if not args.skip_decode:
+            print("  Decode latency (pruned_r16):")
+            dec = bench_decode_latency(model, tokenizer, dev,
+                                        args.decode_prompt_len, args.decode_gen_tokens,
+                                        args.decode_warmup, args.decode_repeats)
+            result_r16["decode_latency"] = dec
 
     all_results.append(result_r16)
     del model

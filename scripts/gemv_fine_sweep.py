@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import json
 from pathlib import Path
+import argparse
 
 def benchmark_gemv(N, K, repeats=50):
     """Benchmark GEMV: y = A @ x"""
@@ -31,37 +32,47 @@ def benchmark_gemv(N, K, repeats=50):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="GEMV fine-grained sweep")
+    parser.add_argument('--start', type=int, default=3800, help='Sweep start dimension')
+    parser.add_argument('--end', type=int, default=4300, help='Sweep end dimension (inclusive)')
+    parser.add_argument('--fixed', type=int, default=4096, help='Fixed dimension for the other axis')
+    parser.add_argument('--repeats', type=int, default=50, help='Benchmark repeats per point')
+    parser.add_argument('--output', type=str, default='results/gemv_fine_sweep.json', help='Output JSON path')
+    args = parser.parse_args()
+
     print("=" * 70)
     print("GEMV Fine-grained Sweep (step=1)")
     print("=" * 70)
 
     results = {}
 
-    # K sweep: 3800 to 4300, step=1, N=4096 fixed
-    print("\n[K Sweep] N=4096, K from 3800 to 4300 (501 points)")
+    # K sweep: [start, end], step=1, N=fixed
+    n_points = args.end - args.start + 1
+    print(f"\n[K Sweep] N={args.fixed}, K from {args.start} to {args.end} ({n_points} points)")
     K_results = []
-    for K in range(3800, 4301):
-        mean_ms, std_ms = benchmark_gemv(4096, K, repeats=50)
+    for K in range(args.start, args.end + 1):
+        mean_ms, std_ms = benchmark_gemv(args.fixed, K, repeats=args.repeats)
         K_results.append({'K': K, 'mean_ms': mean_ms, 'std_ms': std_ms})
         if K % 50 == 0:
             print(f"  K={K}: {mean_ms*1000:.2f}μs")
     results['K_sweep'] = K_results
 
-    # N sweep: 3800 to 4300, step=1, K=4096 fixed
-    print("\n[N Sweep] K=4096, N from 3800 to 4300 (501 points)")
+    # N sweep: [start, end], step=1, K=fixed
+    print(f"\n[N Sweep] K={args.fixed}, N from {args.start} to {args.end} ({n_points} points)")
     N_results = []
-    for N in range(3800, 4301):
-        mean_ms, std_ms = benchmark_gemv(N, 4096, repeats=50)
+    for N in range(args.start, args.end + 1):
+        mean_ms, std_ms = benchmark_gemv(N, args.fixed, repeats=args.repeats)
         N_results.append({'N': N, 'mean_ms': mean_ms, 'std_ms': std_ms})
         if N % 50 == 0:
             print(f"  N={N}: {mean_ms*1000:.2f}μs")
     results['N_sweep'] = N_results
 
     # Save
-    Path('results').mkdir(exist_ok=True)
-    with open('results/gemv_fine_sweep.json', 'w') as f:
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, 'w') as f:
         json.dump(results, f)
-    print(f"\nSaved to results/gemv_fine_sweep.json")
+    print(f"\nSaved to {out}")
 
 
 if __name__ == "__main__":

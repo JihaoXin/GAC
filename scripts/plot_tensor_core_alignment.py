@@ -7,6 +7,25 @@ Style matching the L2 alignment plot.
 import matplotlib.pyplot as plt
 import numpy as np
 import json
+import argparse
+from pathlib import Path
+
+
+def parse_args():
+        parser = argparse.ArgumentParser(description="Plot Tensor Core alignment figures")
+        parser.add_argument("--out-dir", type=str, default="Latex/figures",
+                                                help="Output directory for figures")
+        parser.add_argument("--suffix", type=str, default="",
+                                                help="Filename suffix, e.g., _h100")
+        parser.add_argument("--make-hw-combined", action="store_true",
+                                                help="Also generate fig_hw_alignment (K-TC, N-TC, L2)")
+        return parser.parse_args()
+
+
+args = parse_args()
+out_dir = Path(args.out_dir)
+out_dir.mkdir(parents=True, exist_ok=True)
+suffix = args.suffix
 
 # Load data
 with open('results/tensor_core_alignment_sweep.json', 'r') as f:
@@ -61,9 +80,11 @@ ax.grid(axis='both', alpha=0.3, linestyle='-', linewidth=0.5)
 ax.set_axisbelow(True)
 
 plt.tight_layout()
-plt.savefig('Latex/figures/fig_tc_k_alignment.pdf', bbox_inches='tight', dpi=150)
-plt.savefig('Latex/figures/fig_tc_k_alignment.png', bbox_inches='tight', dpi=150)
-print("Saved K sweep to Latex/figures/fig_tc_k_alignment.pdf")
+out_k_pdf = out_dir / f'fig_tc_k_alignment{suffix}.pdf'
+out_k_png = out_dir / f'fig_tc_k_alignment{suffix}.png'
+plt.savefig(out_k_pdf, bbox_inches='tight', dpi=150)
+plt.savefig(out_k_png, bbox_inches='tight', dpi=150)
+print(f"Saved K sweep to {out_k_pdf}")
 
 # N sweep plot
 n_data = [(d['N'], d['tflops']) for d in raw_data if d['sweep'] == 'N_sweep']
@@ -100,6 +121,65 @@ ax2.grid(axis='both', alpha=0.3, linestyle='-', linewidth=0.5)
 ax2.set_axisbelow(True)
 
 plt.tight_layout()
-plt.savefig('Latex/figures/fig_tc_n_alignment.pdf', bbox_inches='tight', dpi=150)
-plt.savefig('Latex/figures/fig_tc_n_alignment.png', bbox_inches='tight', dpi=150)
-print("Saved N sweep to Latex/figures/fig_tc_n_alignment.pdf")
+out_n_pdf = out_dir / f'fig_tc_n_alignment{suffix}.pdf'
+out_n_png = out_dir / f'fig_tc_n_alignment{suffix}.png'
+plt.savefig(out_n_pdf, bbox_inches='tight', dpi=150)
+plt.savefig(out_n_png, bbox_inches='tight', dpi=150)
+print(f"Saved N sweep to {out_n_pdf}")
+
+
+if args.make_hw_combined:
+        with open('results/l2_dense_sweep.json', 'r') as f:
+                l2_raw = json.load(f)
+
+        l2_data = sorted([(d['K'], d['bandwidth']) for d in l2_raw], key=lambda x: x[0])
+        l2_k = np.array([d[0] for d in l2_data])
+        l2_bw = np.array([d[1] for d in l2_data])
+        l2_aligned = np.array([k % 16 == 0 for k in l2_k])
+        l2_baseline = np.interp(l2_k, l2_k[l2_aligned], l2_bw[l2_aligned])
+
+        fig3, axes = plt.subplots(1, 3, figsize=(10.5, 3.0))
+
+        # (a) Tensor Core K sweep
+        ax = axes[0]
+        ax.fill_between(K_vals, tflops_vals, aligned_baseline, alpha=0.3, color='#D33F49')
+        ax.plot(K_vals, aligned_baseline, '-', color='#389E5C', linewidth=1.5)
+        ax.plot(K_vals, tflops_vals, '-', color='#E07070', linewidth=1.5)
+        ax.set_xlabel(r'$K$ Dimension', fontsize=9)
+        ax.set_ylabel('TFLOPS', fontsize=9)
+        ax.set_xticks([4000, 4032, 4064, 4096])
+        ax.tick_params(labelsize=8)
+        ax.grid(axis='both', alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+
+        # (b) Tensor Core N sweep
+        ax = axes[1]
+        ax.fill_between(N_vals, tflops_n, aligned_baseline_n, alpha=0.3, color='#D33F49')
+        ax.plot(N_vals, aligned_baseline_n, '-', color='#389E5C', linewidth=1.5)
+        ax.plot(N_vals, tflops_n, '-', color='#E07070', linewidth=1.5)
+        ax.set_xlabel(r'$N$ Dimension', fontsize=9)
+        ax.set_ylabel('TFLOPS', fontsize=9)
+        ax.set_xticks([4000, 4032, 4064, 4096])
+        ax.tick_params(labelsize=8)
+        ax.grid(axis='both', alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+
+        # (c) L2 sector sweep
+        ax = axes[2]
+        ax.fill_between(l2_k, l2_bw, l2_baseline, alpha=0.3, color='#D33F49')
+        ax.plot(l2_k, l2_baseline, '-', color='#389E5C', linewidth=1.5)
+        ax.plot(l2_k, l2_bw, '-', color='#E07070', linewidth=1.5)
+        ax.set_xlabel(r'$K$ Dimension', fontsize=9)
+        ax.set_ylabel('Bandwidth (GB/s)', fontsize=9)
+        ax.set_xticks([4000, 4032, 4064, 4096])
+        ax.tick_params(labelsize=8)
+        ax.grid(axis='both', alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+
+        fig3.tight_layout()
+        out_hw_pdf = out_dir / f'fig_hw_alignment{suffix}.pdf'
+        out_hw_png = out_dir / f'fig_hw_alignment{suffix}.png'
+        fig3.savefig(out_hw_pdf, bbox_inches='tight', dpi=150)
+        fig3.savefig(out_hw_png, bbox_inches='tight', dpi=150)
+        plt.close(fig3)
+        print(f"Saved combined hardware figure to {out_hw_pdf}")
