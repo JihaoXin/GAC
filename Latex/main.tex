@@ -201,8 +201,7 @@ Second, allocate the budget $B$ by assigning each $W_i$ a dimension $d_i$ so tha
 \label{eq:budget_allocation}
 \end{equation}
 Here $d_i$ is the compressed dimension (e.g., inner dimension or output width, varies by compression method), $|W_i|$ is the parameter count given dimension $d_i$, $|\mathcal{W}'| = \sum_i |W_i|$ is the total parameter count of the compressed model, and $B$ is the parameter budget.
-Because $s_i$ and the optimum $\{d_i\}$ are continuous, the resulting dimensions are typically \emph{irregular} (e.g., 107, 108, 109) and often violate GPU alignment requirements (e.g.\ $d \bmod 8 = 0$),
-\tlnote{you use $d_i$ in this sentence before for compressed dimension, and now $d$ for model dimension}
+Because $s_i$ and the optimum $\{d_i\}$ are continuous, the resulting dimensions are typically \emph{irregular} (e.g., 107, 108, 109) and often violate GPU alignment requirements (e.g.\ $d_i \bmod 8 = 0$),
  triggering backend fallbacks and kernel switches that erase the expected speedup from fewer parameters and FLOPs.
 
 We demonstrate the dimensional misalignment problem with a real-world example: PaLU~\citep{palu}.
@@ -448,8 +447,7 @@ Because $s_i$ and the resulting $\{d_i^*\}$ are continuous, the compressed model
 \subsection{Step 2: Dimension Sweep}
 \label{sec:step2}
 
-A na\"ive fix would round every $d_i^*$ to the nearest sweetpoint (e.g. multiple of)
-\tlnote{multiple of \texttt{8}?} from the Constraints Table~\ref{tab:constraints}.
+A na\"ive fix would round every $d_i^*$ to the nearest sweetpoint (e.g. multiple of 8) from the Constraints Table~\ref{tab:constraints}.
 However, we cannot hard-code alignment rounding rules because different operators exhibit different behavior across different platforms (e.g., GPU architecture, PyTorch version).
 A fixed heuristic that works on one platform may miss cliffs or exclude valid dimensions on another.
 
