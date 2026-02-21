@@ -138,41 +138,47 @@ if args.make_hw_combined:
         l2_aligned = np.array([k % 16 == 0 for k in l2_k])
         l2_baseline = np.interp(l2_k, l2_k[l2_aligned], l2_bw[l2_aligned])
 
-        fig3, axes = plt.subplots(1, 3, figsize=(10.5, 3.0))
+        fig3, axes = plt.subplots(1, 3, figsize=(10.5, 2.3))
 
         # (a) Tensor Core K sweep
         ax = axes[0]
-        ax.fill_between(K_vals, tflops_vals, aligned_baseline, alpha=0.3, color='#D33F49')
-        ax.plot(K_vals, aligned_baseline, '-', color='#389E5C', linewidth=1.5)
-        ax.plot(K_vals, tflops_vals, '-', color='#E07070', linewidth=1.5)
+        ax.fill_between(K_vals, tflops_vals, aligned_baseline, alpha=0.3, color='#D33F49', label='Alignment penalty')
+        ax.plot(K_vals, aligned_baseline, '-', color='#389E5C', linewidth=1.5, label=r'Aligned ($K$ mod $16 = 0$)')
+        ax.plot(K_vals, tflops_vals, '-', color='#E07070', linewidth=1.5, label='Misaligned')
         ax.set_xlabel(r'$K$ Dimension', fontsize=9)
         ax.set_ylabel('TFLOPS', fontsize=9)
+        ax.text(0.02, 0.95, '(a)', transform=ax.transAxes, fontsize=10, fontweight='bold', va='top')
         ax.set_xticks([4000, 4032, 4064, 4096])
         ax.tick_params(labelsize=8)
+        ax.legend(fontsize=7, framealpha=0.9, loc='lower right')
         ax.grid(axis='both', alpha=0.3, linestyle='-', linewidth=0.5)
         ax.set_axisbelow(True)
 
         # (b) Tensor Core N sweep
         ax = axes[1]
-        ax.fill_between(N_vals, tflops_n, aligned_baseline_n, alpha=0.3, color='#D33F49')
-        ax.plot(N_vals, aligned_baseline_n, '-', color='#389E5C', linewidth=1.5)
-        ax.plot(N_vals, tflops_n, '-', color='#E07070', linewidth=1.5)
+        ax.fill_between(N_vals, tflops_n, aligned_baseline_n, alpha=0.3, color='#D33F49', label='Alignment penalty')
+        ax.plot(N_vals, aligned_baseline_n, '-', color='#389E5C', linewidth=1.5, label=r'Aligned ($N$ mod $8 = 0$)')
+        ax.plot(N_vals, tflops_n, '-', color='#E07070', linewidth=1.5, label='Misaligned')
         ax.set_xlabel(r'$N$ Dimension', fontsize=9)
         ax.set_ylabel('TFLOPS', fontsize=9)
+        ax.text(0.02, 0.95, '(b)', transform=ax.transAxes, fontsize=10, fontweight='bold', va='top')
         ax.set_xticks([4000, 4032, 4064, 4096])
         ax.tick_params(labelsize=8)
+        ax.legend(fontsize=7, framealpha=0.9, loc='lower right')
         ax.grid(axis='both', alpha=0.3, linestyle='-', linewidth=0.5)
         ax.set_axisbelow(True)
 
         # (c) L2 sector sweep
         ax = axes[2]
-        ax.fill_between(l2_k, l2_bw, l2_baseline, alpha=0.3, color='#D33F49')
-        ax.plot(l2_k, l2_baseline, '-', color='#389E5C', linewidth=1.5)
-        ax.plot(l2_k, l2_bw, '-', color='#E07070', linewidth=1.5)
+        ax.fill_between(l2_k, l2_bw, l2_baseline, alpha=0.3, color='#D33F49', label='Alignment penalty')
+        ax.plot(l2_k, l2_baseline, '-', color='#389E5C', linewidth=1.5, label=r'Aligned ($K$ mod $16 = 0$)')
+        ax.plot(l2_k, l2_bw, '-', color='#E07070', linewidth=1.5, label='Misaligned')
         ax.set_xlabel(r'$K$ Dimension', fontsize=9)
-        ax.set_ylabel('Bandwidth (GB/s)', fontsize=9)
+        ax.set_ylabel('GB/s', fontsize=9)
+        ax.text(0.02, 0.95, '(c)', transform=ax.transAxes, fontsize=10, fontweight='bold', va='top')
         ax.set_xticks([4000, 4032, 4064, 4096])
         ax.tick_params(labelsize=8)
+        ax.legend(fontsize=7, framealpha=0.9, loc='lower right')
         ax.grid(axis='both', alpha=0.3, linestyle='-', linewidth=0.5)
         ax.set_axisbelow(True)
 
