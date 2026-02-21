@@ -497,7 +497,8 @@ In practice, the DP runs in under one second on CPU---negligible compared to the
 
 \subsection{Setup}
 
-We evaluate on Llama-3-8B~\citep{llama3} with $\rho=15\%$ using an NVIDIA A100-80GB with PyTorch 2.9.1, CUDA 12.8, FP16. We also conduct experiments on an NVIDIA H100-80GB (Hopper architecture), with detailed results provided in Appendix~\ref{app:h100}.
+We evaluate on Llama-3-8B~\citep{llama3} with $\rho=15\%$, using PyTorch~2.9.1, CUDA~12.8, and FP16. Experiments were conducted on two architectures: NVIDIA Ampere (A100-80GB) and Hopper (H100-80GB). Unless stated otherwise, the results are collected from A100.
+We also repeated some experiments on H100, which confirmed similar patterns (see Appendix~\ref{app:h100}).
 We select two representative compressors that alter tensor dimensions in orthogonal ways:
 \textbf{(1)~ASVD}~\citep{asvd}: activation-aware SVD ($W \to A \cdot B$) across all projection weights\footnote{All 32 layers $\times$ 7 projections (Q, K, V, O, gate, up, down) = 224 weights.}.
 \textbf{(2)~LLM-Pruner}~\citep{llmpruner}: coupled structured pruning of MLP weights\footnote{Layers 3--31 (29/32 layers); gate\_proj as pruning root, propagating to up\_proj and down\_proj.}.
@@ -506,7 +507,7 @@ We compare the uncompressed \emph{baseline} with \emph{Unaligned} (original comp
 \subsection{Implementation}
 
 We implement GAC as a proof-of-concept by adding the DP solver on top of the existing ASVD and LLM-Pruner codebases (not yet a standalone framework; see \S\ref{sec:future}).
-The dimension sweep profiles compression-sensitive kernels\footnote{In Transformers, mainly GEMM, SDPA and GEMV.} on the target GPU to build candidate sets (\S\ref{sec:step2}); the DP solver (\S\ref{sec:step3}) then selects aligned dimensions.
+The dimension sweep profiles compression-sensitive kernels (e.g., GEMM, SDPA and GEMV) on the target GPU to build candidate sets (\S\ref{sec:step2}); the DP solver (\S\ref{sec:step3}) then selects aligned dimensions.
 No model architecture changes, no runtime overhead, and no extra inference memory are required---GAC modifies only the dimension allocation before the final compression step.
 
 \subsection{Preliminary Results}
@@ -591,10 +592,9 @@ We evaluate on a single dense model (Llama-3-8B).
 Extending to more varieties (larger scales, MoE architectures, etc.) would test GAC's generality.
 
 \noindent \textbf{Hardware diversity.}
-All experiments use Ampere (A100) by default, with Hopper (H100) results provided in Appendix~\ref{app:h100}.
-Newer GPUs impose stricter alignment~\citep{nvidia_tensor_core_evolution2024,nvidia_hopper_whitepaper,flashattention3};
-edge devices (e.g., DGX Spark) add further constraints.
-Profiling across generations would yield a broader heuristic landscape.
+Newer GPUs such as Blackwell impose stricter alignment~\citep{nvidia_tensor_core_evolution2024,nvidia_hopper_whitepaper,flashattention3};
+Specialized devices, e.g., DGX Spark and Jetson Nano, adding further constraints.
+
 
 \noindent \textbf{Latency coverage.}
 We report prefill latency at batch${=}1$, $S{=}1024$.
@@ -659,7 +659,7 @@ To demonstrate that dimensional misalignment is a fundamental hardware-software 
 
 \textbf{Hardware-Level Penalties.} Figure~\ref{fig:hw_alignment_h100} details the hardware-level alignment penalties on H100. The impact on Tensor Core throughput (Figure~\ref{fig:hw_alignment_h100}a,b) and L2 Cache bandwidth (Figure~\ref{fig:hw_alignment_h100}c) follows the same periodic degradation patterns observed on Ampere, confirming that the underlying tile and sector alignment requirements remain critical bottlenecks for irregular dimensions.
 
-\textbf{End-to-End Latency.} Finally, Figure~\ref{fig:prefill_scaling_h100} shows the end-to-end prefill latency scaling on H100 for Llama-3-8B. The unaligned compressed models suffer from severe slowdowns, completely negating the theoretical benefits of parameter reduction. In contrast, GAC successfully restores the expected speedup by enforcing hardware-aligned dimensions, demonstrating that our alignment-aware compression paradigm is highly effective across different GPU generations.
+\textbf{End-to-End Latency.} Finally, Figure~\ref{fig:prefill_scaling_h100} shows the end-to-end prefill latency scaling on H100 for Llama-3-8B. The unaligned compressed models suffer from severe slowdowns, completely negating the theoretical benefits of parameter reduction. In contrast, GAC successfully restores the latency by enforcing hardware-aligned dimensions, especially for larger batch size. This demonstrates that our alignment-aware compression paradigm is highly effective across different GPU generations. 
 
 \begin{figure}[h]
 \centering
