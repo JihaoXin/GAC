@@ -657,8 +657,6 @@ To demonstrate that dimensional misalignment is not specific to the Ampere archi
 
 Figure~\ref{fig:sdpa_latency_h100} shows the SDPA latency on H100. Similar to A100, we observe a staircase pattern, but the penalties for misalignment are even more pronounced due to the higher peak performance of the H100.
 
-Figure~\ref{fig:gemm_alignment_h100} illustrates the GEMM latency with dimension sweeps on H100. The kernel-switching cliffs and alignment penalties remain significant.
-
 Figure~\ref{fig:hw_alignment_h100} details the hardware-level alignment penalties on H100, showing the impact on Tensor Core throughput and L2 Cache bandwidth.
 
 Finally, Figure~\ref{fig:prefill_scaling_h100} shows the end-to-end prefill latency scaling on H100. The unaligned models suffer from severe slowdowns, while GAC successfully restores the expected speedup by enforcing hardware-aligned dimensions.
@@ -669,13 +667,6 @@ Finally, Figure~\ref{fig:prefill_scaling_h100} shows the end-to-end prefill late
 \caption{PyTorch SDPA latency across dimensions on H100.}
 \label{fig:sdpa_latency_h100}
 \end{figure}
-
-\begin{figure*}[h]
-\centering
-\includegraphics[width=\textwidth]{figures_h100/fig_gemm_alignment_h100.pdf}
-\caption{GEMM latency with dimension sweep on H100.}
-\label{fig:gemm_alignment_h100}
-\end{figure*}
 
 \begin{figure*}[h]
 \centering
