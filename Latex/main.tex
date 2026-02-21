@@ -653,17 +653,17 @@ At every ratio, a substantial fraction of dimensions are misaligned, confirming 
 \clearpage
 \section{Dimensional Misalignment on H100 GPU}
 \label{app:h100}
-To demonstrate that dimensional misalignment is not specific to the Ampere architecture, we replicate our key profiling and evaluation experiments on an NVIDIA H100-80GB GPU. The Hopper architecture introduces new Tensor Core instructions (e.g., TMA) and different cache hierarchies, which impose even stricter alignment constraints.
+To demonstrate that dimensional misalignment is a fundamental hardware-software co-design issue and not specific to the Ampere architecture, we replicate our key profiling and evaluation experiments on an NVIDIA H100-80GB GPU (Hopper architecture). The Hopper architecture introduces new Tensor Core instructions (e.g., Tensor Memory Accelerator or TMA) and different cache hierarchies, which impose even stricter alignment constraints to achieve peak performance.
 
-Figure~\ref{fig:sdpa_latency_h100} shows the SDPA latency on H100. Similar to A100, we observe a staircase pattern, but the penalties for misalignment are even more pronounced due to the higher peak performance of the H100.
+\textbf{Framework-Level Penalties.} Figure~\ref{fig:sdpa_latency_h100} shows the SDPA latency on H100. Similar to the A100 results, we observe a distinct staircase pattern. However, the penalties for misalignment are even more pronounced. Because the H100 has a significantly higher peak compute throughput, falling back to unoptimized kernels (e.g., the Math backend when $d \bmod 8 \neq 0$) results in a much larger relative slowdown compared to the A100.
 
-Figure~\ref{fig:hw_alignment_h100} details the hardware-level alignment penalties on H100, showing the impact on Tensor Core throughput and L2 Cache bandwidth.
+\textbf{Hardware-Level Penalties.} Figure~\ref{fig:hw_alignment_h100} details the hardware-level alignment penalties on H100. The impact on Tensor Core throughput (Figure~\ref{fig:hw_alignment_h100}a,b) and L2 Cache bandwidth (Figure~\ref{fig:hw_alignment_h100}c) follows the same periodic degradation patterns observed on Ampere, confirming that the underlying tile and sector alignment requirements remain critical bottlenecks for irregular dimensions.
 
-Finally, Figure~\ref{fig:prefill_scaling_h100} shows the end-to-end prefill latency scaling on H100. The unaligned models suffer from severe slowdowns, while GAC successfully restores the expected speedup by enforcing hardware-aligned dimensions.
+\textbf{End-to-End Latency.} Finally, Figure~\ref{fig:prefill_scaling_h100} shows the end-to-end prefill latency scaling on H100 for Llama-3-8B. The unaligned compressed models suffer from severe slowdowns, completely negating the theoretical benefits of parameter reduction. In contrast, GAC successfully restores the expected speedup by enforcing hardware-aligned dimensions, demonstrating that our alignment-aware compression paradigm is highly effective across different GPU generations.
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=\columnwidth]{figures_h100/fig2_sdpa_latency_h100.pdf}
+\includegraphics[width=0.6\textwidth]{figures_h100/fig2_sdpa_latency_h100.pdf}
 \caption{PyTorch SDPA latency across dimensions on H100.}
 \label{fig:sdpa_latency_h100}
 \end{figure}
@@ -677,7 +677,7 @@ Finally, Figure~\ref{fig:prefill_scaling_h100} shows the end-to-end prefill late
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=\columnwidth]{figures_h100/fig_prefill_scaling_h100.pdf}
+\includegraphics[width=0.6\textwidth]{figures_h100/fig_prefill_scaling_h100.pdf}
 \caption{Llama-3-8B latency across sequence lengths on H100.}
 \label{fig:prefill_scaling_h100}
 \end{figure}
