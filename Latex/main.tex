@@ -241,7 +241,7 @@ Fisher & $\mathrm{tr}(\mathbf{F}_i)$ & Loss curvature & PaLU \citep{palu} \\
 
 \section{Full-Stack Analysis}
 \label{sec:analysis}
-We analyze where and why dimensional misalignment causes slowdowns on an NVIDIA A100-80GB with PyTorch 2.9.1, CUDA 12.8, FP16 (results for H100-80GB are provided in Appendix~\ref{app:h100}).
+We analyze where and why dimensional misalignment causes slowdowns on an NVIDIA A100-80GB with PyTorch 2.9.1, CUDA 12.8, FP16.
 Latency is measured with CUDA events (50 warmup, 200 measurement iterations, 3 trials).
 Root causes fall into three layers (Figure~\ref{fig:fullstack_overview}): Framework, Library, and Hardware. We detail each layer in the following subsections.
 \begin{figure}[t]
@@ -497,7 +497,7 @@ In practice, the DP runs in under one second on CPU---negligible compared to the
 
 \subsection{Setup}
 
-We evaluate on Llama-3-8B~\citep{llama3} with $\rho=15\%$ using an NVIDIA A100-80GB with PyTorch 2.9.1, CUDA 12.8, FP16 (see Appendix~\ref{app:h100} for H100 results).
+We evaluate on Llama-3-8B~\citep{llama3} with $\rho=15\%$ using an NVIDIA A100-80GB with PyTorch 2.9.1, CUDA 12.8, FP16. We also conduct experiments on an NVIDIA H100-80GB (Hopper architecture), with detailed results provided in Appendix~\ref{app:h100}.
 We select two representative compressors that alter tensor dimensions in orthogonal ways:
 \textbf{(1)~ASVD}~\citep{asvd}: activation-aware SVD ($W \to A \cdot B$) across all projection weights\footnote{All 32 layers $\times$ 7 projections (Q, K, V, O, gate, up, down) = 224 weights.}.
 \textbf{(2)~LLM-Pruner}~\citep{llmpruner}: coupled structured pruning of MLP weights\footnote{Layers 3--31 (29/32 layers); gate\_proj as pruning root, propagating to up\_proj and down\_proj.}.
@@ -591,7 +591,7 @@ We evaluate on a single dense model (Llama-3-8B).
 Extending to more varieties (larger scales, MoE architectures, etc.) would test GAC's generality.
 
 \noindent \textbf{Hardware diversity.}
-While our main experiments use Ampere (A100), we also provide results on Hopper (H100) in Appendix~\ref{app:h100}, which shows even stricter alignment penalties.
+All experiments use Ampere (A100) by default, with Hopper (H100) results provided in Appendix~\ref{app:h100}.
 Newer GPUs impose stricter alignment~\citep{nvidia_tensor_core_evolution2024,nvidia_hopper_whitepaper,flashattention3};
 edge devices (e.g., DGX Spark) add further constraints.
 Profiling across generations would yield a broader heuristic landscape.
